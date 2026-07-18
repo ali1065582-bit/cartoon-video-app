@@ -1,0 +1,723 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>AI Video Studio - لوحة التحكم</title>
+<script src="https://cdn.tailwindcss.com"></script>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Tajawal:wght@400;500;700;900&display=swap" rel="stylesheet">
+<style>
+  body { font-family: 'Tajawal', sans-serif; }
+  .gradient-bg { background: linear-gradient(135deg, #0f172a 0%, #1e1b4b 50%, #0f172a 100%); }
+  .glow-btn { box-shadow: 0 0 25px rgba(168, 85, 247, 0.5); }
+  .glow-btn:hover { box-shadow: 0 0 40px rgba(168, 85, 247, 0.8); }
+  .card { background: rgba(30, 27, 75, 0.4); backdrop-filter: blur(12px); border: 1px solid rgba(148, 163, 184, 0.15); }
+  .ring-progress { transform: rotate(-90deg); }
+  .price-card { transition: transform .25s ease, box-shadow .25s ease; }
+  .price-card:hover { transform: translateY(-6px); }
+  .price-card.popular { border: 2px solid #a855f7; }
+</style>
+</head>
+<body class="gradient-bg min-h-screen text-slate-100">
+
+  <!-- Navbar -->
+  <nav class="sticky top-0 z-50 backdrop-blur-md bg-slate-950/70 border-b border-slate-800">
+    <div class="max-w-6xl mx-auto px-4 sm:px-6 py-3 flex items-center justify-between">
+      <div class="flex items-center gap-2">
+        <div class="w-9 h-9 rounded-xl bg-gradient-to-tr from-purple-500 to-pink-500 flex items-center justify-center text-lg">🎬</div>
+        <span class="font-black text-lg sm:text-xl bg-gradient-to-l from-purple-400 to-pink-400 bg-clip-text text-transparent">AI Video Studio</span>
+      </div>
+      <div class="flex items-center gap-2 sm:gap-4">
+        <span id="navPlanBadge" class="text-xs font-bold bg-slate-800 border border-purple-500/30 text-purple-300 rounded-full px-3 py-1.5 hidden sm:inline">
+          الباقة المجانية
+        </span>
+        <div class="flex items-center gap-1.5 bg-slate-800/70 border border-amber-400/30 rounded-full px-3 py-1.5">
+          <span class="text-amber-400">⭐</span>
+          <span class="font-bold text-amber-300 text-sm sm:text-base" id="navPoints">0</span>
+          <span class="text-xs text-slate-400 hidden sm:inline">نقطة</span>
+        </div>
+        <button id="authBtn" class="bg-gradient-to-l from-purple-600 to-pink-600 hover:from-purple-500 hover:to-pink-500 transition text-white text-sm sm:text-base font-bold px-4 py-2 rounded-full">
+          تسجيل الدخول
+        </button>
+      </div>
+    </div>
+  </nav>
+
+  <main class="max-w-6xl mx-auto px-4 sm:px-6 py-10 space-y-14">
+
+    <!-- 1. Video Generation -->
+    <section id="generate" class="card rounded-2xl p-5 sm:p-8 space-y-5">
+      <h2 class="font-black text-xl sm:text-2xl flex items-center gap-2">🎬 توليد الفيديو</h2>
+
+      <div>
+        <label class="block mb-2 font-bold text-slate-200">صف المشهد الذي تريد توليده</label>
+        <textarea id="promptInput" rows="5"
+          class="w-full rounded-xl bg-slate-900/70 border border-slate-700 focus:border-purple-500 focus:ring-2 focus:ring-purple-500/40 outline-none p-4 text-slate-100 placeholder-slate-500 resize-none transition"
+          placeholder="مثال: قطة صغيرة كرتونية تلعب بكرة صوف ملونة في حديقة مشمسة..."></textarea>
+      </div>
+
+      <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
+        <div>
+          <label class="block mb-2 font-bold text-slate-200 text-sm">جودة الفيديو (حسب باقتك)</label>
+          <select id="qualitySelect" class="w-full rounded-xl bg-slate-900/70 border border-slate-700 focus:border-purple-500 outline-none p-3 text-slate-100">
+            <option value="480p">🆓 480p — الباقة المجانية</option>
+            <option value="720p">⚡ 720p HD — الباقة المتوسطة</option>
+            <option value="1080p">💎 1080p / 4K — الباقة الاحترافية</option>
+          </select>
+        </div>
+        <div>
+          <label class="block mb-2 font-bold text-slate-200 text-sm">أبعاد الفيديو</label>
+          <select id="aspectRatio" class="w-full rounded-xl bg-slate-900/70 border border-slate-700 focus:border-purple-500 outline-none p-3 text-slate-100">
+            <option value="9:16">📱 عمودي 9:16 (شورتس / ريلز)</option>
+            <option value="16:9">🖥️ أفقي 16:9</option>
+          </select>
+        </div>
+      </div>
+
+      <button id="generateBtn" class="glow-btn w-full py-4 rounded-2xl bg-gradient-to-l from-purple-600 via-fuchsia-600 to-pink-600 font-black text-lg sm:text-xl transition hover:scale-[1.01] active:scale-[0.99]">
+        توليد الفيديو الاستثماري 🚀
+      </button>
+
+      <p class="text-center text-xs text-slate-500">
+        ⚡ محرك مجاني 100%: قد يستغرق التوليد حتى دقيقة بسبب إعادة المحاولة التلقائية عند الازدحام،
+        والنتيجة مقطع قصير بنمط أنمي/كرتوني.
+      </p>
+
+      <p id="statusText" class="text-center text-sm text-slate-400 hidden"></p>
+    </section>
+
+    <!-- 2. Points System -->
+    <section id="points" class="card rounded-2xl p-5 sm:p-8">
+      <h2 class="font-black text-xl sm:text-2xl mb-6 flex items-center gap-2">⭐ نظام النقاط الذكي</h2>
+      <div class="flex flex-col md:flex-row items-center justify-between gap-8">
+
+        <!-- Circular progress -->
+        <div class="relative w-40 h-40 shrink-0">
+          <svg class="w-40 h-40 ring-progress" viewBox="0 0 120 120">
+            <circle cx="60" cy="60" r="52" stroke="#1e293b" stroke-width="12" fill="none"/>
+            <circle id="pointsRing" cx="60" cy="60" r="52" stroke="url(#gradPoints)" stroke-width="12" fill="none"
+              stroke-linecap="round" stroke-dasharray="326.7" stroke-dashoffset="326.7"/>
+            <defs>
+              <linearGradient id="gradPoints" x1="0%" y1="0%" x2="100%" y2="100%">
+                <stop offset="0%" stop-color="#a855f7"/>
+                <stop offset="100%" stop-color="#ec4899"/>
+              </linearGradient>
+            </defs>
+          </svg>
+          <div class="absolute inset-0 flex flex-col items-center justify-center">
+            <span class="text-3xl font-black" id="pointsValue">0</span>
+            <span class="text-xs text-slate-400">نقطة</span>
+          </div>
+        </div>
+
+        <div class="flex-1 w-full space-y-3 text-center md:text-right">
+          <p class="text-slate-300 font-bold">رصيدك الحالي: <span id="pointsLabel">0</span> نقطة</p>
+          <p class="text-slate-500 text-sm">شاهد فيديو قصير واكسب نقاطاً تستخدمها لتوليد فيديوهات مجاناً</p>
+          <button id="earnPointsBtn" class="w-full md:w-auto glow-btn bg-gradient-to-l from-emerald-500 to-teal-500 font-black text-white px-6 py-3.5 rounded-2xl hover:scale-[1.02] transition">
+            ▶️ كسب نقاط مجانية (شاهد فيديو عالم الصغار 60 ثانية)
+          </button>
+        </div>
+      </div>
+    </section>
+
+    <!-- 3. Pricing & Payment -->
+    <section id="pricing" class="space-y-6">
+      <h2 class="font-black text-xl sm:text-2xl flex items-center gap-2">💳 ترقية الحساب</h2>
+      <div class="grid grid-cols-1 md:grid-cols-3 gap-6">
+
+        <!-- Free Plan -->
+        <div class="price-card card rounded-2xl p-6 flex flex-col">
+          <h3 class="font-black text-lg text-slate-200">الباقة المجانية</h3>
+          <p class="text-3xl font-black my-3">0 <span class="text-sm text-slate-400 font-normal">/ شهرياً</span></p>
+          <ul class="space-y-2 text-sm text-slate-400 flex-1 my-4">
+            <li>✅ جودة 480p</li>
+            <li>✅ 3 فيديوهات شهرياً</li>
+            <li>✅ نظام كسب النقاط</li>
+            <li class="text-slate-600">❌ بدون علامة مائية إضافية</li>
+          </ul>
+          <button id="freePlanBtn" class="w-full py-3 rounded-xl bg-slate-800 font-bold hover:bg-slate-700 transition" disabled>باقتك الحالية</button>
+        </div>
+
+        <!-- Medium Plan -->
+        <div class="price-card popular card rounded-2xl p-6 flex flex-col relative">
+          <span class="absolute -top-3 right-1/2 translate-x-1/2 bg-purple-600 text-xs font-bold px-3 py-1 rounded-full">الأكثر شيوعاً</span>
+          <h3 class="font-black text-lg text-slate-200">الباقة المتوسطة</h3>
+          <p class="text-3xl font-black my-3">15,000 <span class="text-sm text-slate-400 font-normal">د.ع / شهرياً</span></p>
+          <ul class="space-y-2 text-sm text-slate-400 flex-1 my-4">
+            <li>✅ جودة 720p HD</li>
+            <li>✅ 20 فيديو شهرياً</li>
+            <li>✅ أولوية في التوليد</li>
+            <li>✅ دعم فني سريع</li>
+          </ul>
+          <div class="space-y-2">
+            <button class="payment-btn w-full py-2.5 rounded-xl bg-white text-slate-900 font-bold text-sm hover:bg-slate-200 transition flex items-center justify-center gap-2" data-plan="medium" data-gateway="zaincash">
+              💚 الدفع عبر Zain Cash
+            </button>
+            <button class="payment-btn w-full py-2.5 rounded-xl bg-white text-slate-900 font-bold text-sm hover:bg-slate-200 transition flex items-center justify-center gap-2" data-plan="medium" data-gateway="asiahawala">
+              🟠 الدفع عبر AsiaHawala
+            </button>
+            <button class="payment-btn w-full py-2.5 rounded-xl bg-white text-slate-900 font-bold text-sm hover:bg-slate-200 transition flex items-center justify-center gap-2" data-plan="medium" data-gateway="qicard">
+              🔵 الدفع عبر Qi Card
+            </button>
+          </div>
+        </div>
+
+        <!-- Pro Plan -->
+        <div class="price-card card rounded-2xl p-6 flex flex-col">
+          <h3 class="font-black text-lg text-slate-200">الباقة الاحترافية</h3>
+          <p class="text-3xl font-black my-3">35,000 <span class="text-sm text-slate-400 font-normal">د.ع / شهرياً</span></p>
+          <ul class="space-y-2 text-sm text-slate-400 flex-1 my-4">
+            <li>✅ جودة 1080p / 4K</li>
+            <li>✅ فيديوهات غير محدودة</li>
+            <li>✅ بدون علامة مائية</li>
+            <li>✅ دعم فني VIP</li>
+          </ul>
+          <div class="space-y-2">
+            <button class="payment-btn w-full py-2.5 rounded-xl bg-white text-slate-900 font-bold text-sm hover:bg-slate-200 transition flex items-center justify-center gap-2" data-plan="pro" data-gateway="zaincash">
+              💚 الدفع عبر Zain Cash
+            </button>
+            <button class="payment-btn w-full py-2.5 rounded-xl bg-white text-slate-900 font-bold text-sm hover:bg-slate-200 transition flex items-center justify-center gap-2" data-plan="pro" data-gateway="asiahawala">
+              🟠 الدفع عبر AsiaHawala
+            </button>
+            <button class="payment-btn w-full py-2.5 rounded-xl bg-white text-slate-900 font-bold text-sm hover:bg-slate-200 transition flex items-center justify-center gap-2" data-plan="pro" data-gateway="qicard">
+              🔵 الدفع عبر Qi Card
+            </button>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- 4. Video Gallery -->
+    <section id="gallery" class="space-y-6">
+      <h2 class="font-black text-xl sm:text-2xl flex items-center gap-2">🖼️ معرض الفيديوهات</h2>
+      <div class="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-4" id="videoGrid">
+        <!-- سيتم تكرار هذا القالب عبر JS -->
+      </div>
+    </section>
+  </main>
+
+  <!-- ============================================================ -->
+  <!-- Modal: مشاهدة فيديو لكسب النقاط -->
+  <!-- ============================================================ -->
+  <div id="watchModal" class="hidden fixed inset-0 z-[100] bg-black/70 backdrop-blur-sm flex items-center justify-center p-4">
+    <div class="card w-full max-w-lg rounded-2xl p-5 sm:p-6 space-y-4 relative">
+      <button id="closeModalBtn" class="absolute left-4 top-4 text-slate-400 hover:text-white text-xl">✕</button>
+
+      <h3 class="font-black text-lg sm:text-xl text-center">شاهد الفيديو كاملاً لتكسب 10 نقاط 🎁</h3>
+
+      <div class="aspect-video w-full rounded-xl overflow-hidden border border-slate-700 bg-black">
+        <!-- فيديو مستضاف ذاتياً محلياً على السيرفر (بدون أي قيود تضمين من يوتيوب) -->
+        <!-- loop: يعيد التشغيل تلقائياً حتى يغطي كامل مدة الـ 60 ثانية -->
+        <video id="watchVideo" class="w-full h-full" src="" controls autoplay muted loop playsinline>
+          متصفحك لا يدعم تشغيل الفيديو.
+        </video>
+      </div>
+
+      <!-- العداد التنازلي -->
+      <div class="text-center space-y-1">
+        <p class="text-slate-400 text-sm">الوقت المتبقي حتى تفعيل زر الاستلام:</p>
+        <p class="text-3xl font-black text-purple-400" id="countdownDisplay">60</p>
+      </div>
+
+      <button id="claimPointsBtn" disabled
+        class="w-full py-3.5 rounded-2xl font-black text-lg transition bg-slate-700 text-slate-400 cursor-not-allowed">
+        انتظر انتهاء المشاهدة...
+      </button>
+
+      <p id="claimStatusText" class="text-center text-sm hidden"></p>
+    </div>
+  </div>
+
+  <!-- ============================================================ -->
+  <!-- Modal: بوابة الدفع التجريبية (Sandbox) -->
+  <!-- ============================================================ -->
+  <div id="checkoutModal" class="hidden fixed inset-0 z-[100] bg-black/70 backdrop-blur-sm flex items-center justify-center p-4">
+    <div class="card w-full max-w-md rounded-2xl p-6 space-y-4 relative">
+      <button id="closeCheckoutModalBtn" class="absolute left-4 top-4 text-slate-400 hover:text-white text-xl">✕</button>
+
+      <h3 class="font-black text-lg text-center" id="checkoutTitle">الدفع عبر Zain Cash</h3>
+      <p class="text-center text-sm text-slate-400" id="checkoutSubtitle">ترقية إلى الباقة المتوسطة - 15,000 د.ع</p>
+
+      <div class="bg-amber-500/10 border border-amber-500/30 rounded-xl p-3 text-xs text-amber-300 text-center">
+        🧪 وضع تجريبي (Sandbox) بالكامل: لا يتم خصم أي مبلغ حقيقي. استخدم رمز التحقق
+        <span class="font-black">123456</span> لإتمام الدفع تجريبياً.
+      </div>
+
+      <div>
+        <label class="block mb-1 text-sm font-bold text-slate-300">رقم المحفظة</label>
+        <input id="walletNumberInput" type="text" inputmode="numeric" placeholder="07xxxxxxxxx" maxlength="15"
+          class="w-full rounded-xl bg-slate-900/70 border border-slate-700 focus:border-purple-500 outline-none p-3 text-slate-100 placeholder-slate-500" />
+      </div>
+
+      <div>
+        <label class="block mb-1 text-sm font-bold text-slate-300">رمز التحقق (OTP)</label>
+        <input id="otpInput" type="text" inputmode="numeric" placeholder="123456" maxlength="6"
+          class="w-full rounded-xl bg-slate-900/70 border border-slate-700 focus:border-purple-500 outline-none p-3 text-slate-100 placeholder-slate-500" />
+      </div>
+
+      <button id="confirmPaymentBtn" class="w-full py-3.5 rounded-2xl font-black text-lg bg-gradient-to-l from-emerald-500 to-teal-500 text-white hover:scale-[1.01] transition">
+        تأكيد الدفع ✅
+      </button>
+
+      <p id="checkoutStatusText" class="text-center text-sm hidden"></p>
+    </div>
+  </div>
+
+  <footer class="text-center text-slate-500 text-xs py-6">
+    © 2026 AI Video Studio — جميع الحقوق محفوظة
+  </footer>
+
+<script>
+  // ---------- بيانات تجريبية لمعرض الفيديوهات ----------
+  const placeholders = [
+    { title: "مغامرة الديناصور الصغير", emoji: "🦕", color: "from-emerald-500 to-teal-500" },
+    { title: "رحلة الفضاء الكرتونية", emoji: "🚀", color: "from-indigo-500 to-purple-500" },
+    { title: "قطة تلعب في الحديقة", emoji: "🐱", color: "from-pink-500 to-rose-500" },
+    { title: "عالم تحت الماء", emoji: "🐠", color: "from-blue-500 to-cyan-500" },
+    { title: "غابة سحرية", emoji: "🌳", color: "from-green-500 to-lime-500" },
+    { title: "روبوت صغير ودود", emoji: "🤖", color: "from-slate-500 to-slate-700" },
+    { title: "سباق السيارات الكرتوني", emoji: "🏎️", color: "from-red-500 to-orange-500" },
+    { title: "قصة ما قبل النوم", emoji: "🌙", color: "from-violet-500 to-indigo-500" },
+  ];
+
+  const grid = document.getElementById('videoGrid');
+  placeholders.forEach(item => {
+    const card = document.createElement('div');
+    card.className = "card rounded-xl overflow-hidden flex flex-col";
+    card.innerHTML = `
+      <div class="aspect-[9/16] bg-gradient-to-br ${item.color} flex items-center justify-center text-5xl">
+        ${item.emoji}
+      </div>
+      <div class="p-3 space-y-2">
+        <p class="text-xs font-bold text-slate-300 truncate">${item.title}</p>
+        <div class="flex gap-2">
+          <button class="flex-1 text-xs font-bold bg-slate-800 hover:bg-slate-700 transition rounded-lg py-1.5">▶️ تشغيل</button>
+          <button class="flex-1 text-xs font-bold bg-slate-800 hover:bg-slate-700 transition rounded-lg py-1.5">⬇️ تحميل</button>
+        </div>
+      </div>
+    `;
+    grid.appendChild(card);
+  });
+
+  // ============================================================
+  // نظام النقاط الذكي (Watch-to-Earn)
+  // ============================================================
+  const RING_CIRCUMFERENCE = 326.7;
+  const MAX_POINTS_FOR_RING = 100; // عند 100 نقطة تكتمل الدائرة بصرياً
+  const REQUIRED_WATCH_SECONDS = 60;
+  // فيديو مستضاف ذاتياً على السيرفر (static/demo/sample.mp4) - بدون أي قيود
+  // تضمين من يوتيوب (خطأ 150 وأمثاله)، ويعمل حتى بدون اتصال إنترنت.
+  // خاصية loop في وسم <video> تعيد تشغيله تلقائياً حتى تكتمل الـ 60 ثانية.
+  const WATCH_VIDEO_URL = "/assets/demo/sample.mp4";
+
+  let points = 0;
+  let userPlan = 'free';         // الباقة الحالية للمستخدم (مقروءة من قاعدة البيانات)
+  let currentSessionId = null;   // معرّف جلسة المشاهدة الحالية (من السيرفر)
+  let countdownInterval = null;  // مؤقت العدّ التنازلي في الواجهة
+  let secondsLeft = REQUIRED_WATCH_SECONDS;
+
+  const PLAN_LABELS = {
+    free: 'الباقة المجانية',
+    medium: 'الباقة المتوسطة',
+    pro: 'الباقة الاحترافية',
+  };
+
+  const pointsValueEl = document.getElementById('pointsValue');
+  const pointsLabelEl = document.getElementById('pointsLabel');
+  const navPointsEl = document.getElementById('navPoints');
+  const navPlanBadgeEl = document.getElementById('navPlanBadge');
+  const pointsRingEl = document.getElementById('pointsRing');
+  const watchModal = document.getElementById('watchModal');
+  const watchVideo = document.getElementById('watchVideo');
+  const countdownDisplay = document.getElementById('countdownDisplay');
+  const claimPointsBtn = document.getElementById('claimPointsBtn');
+  const claimStatusText = document.getElementById('claimStatusText');
+  const earnPointsBtn = document.getElementById('earnPointsBtn');
+
+  function updatePointsUI() {
+    pointsValueEl.textContent = points;
+    pointsLabelEl.textContent = points;
+    navPointsEl.textContent = points;
+    const ratio = Math.min(points / MAX_POINTS_FOR_RING, 1);
+    const offset = RING_CIRCUMFERENCE - (ratio * RING_CIRCUMFERENCE);
+    pointsRingEl.setAttribute('stroke-dashoffset', offset);
+  }
+
+  // يعرض اسم الباقة الحالية في شريط التنقل، ويحدّث زر "الباقة المجانية"
+  // في بطاقات الأسعار (يُعطَّل تلقائياً إن كانت هذه هي باقتك الحالية).
+  function updatePlanBadge() {
+    navPlanBadgeEl.textContent = PLAN_LABELS[userPlan] || 'الباقة المجانية';
+    const freePlanBtn = document.getElementById('freePlanBtn');
+    if (freePlanBtn) {
+      freePlanBtn.textContent = userPlan === 'free' ? 'باقتك الحالية' : 'تمت الترقية بالفعل';
+    }
+  }
+
+  // ---------- 1) جلب رصيد المستخدم الحقيقي من السيرفر عند تحميل الصفحة ----------
+  async function loadUserStatus() {
+    try {
+      const res = await fetch('/api/user-status');
+      const data = await res.json();
+      points = data.points;
+      userPlan = data.plan;
+      updatePointsUI();
+      updatePlanBadge();
+    } catch (err) {
+      console.error('تعذّر جلب حالة المستخدم:', err);
+    }
+  }
+
+  // ---------- 2) فتح نافذة المشاهدة فوراً + بدء جلسة موثّقة من السيرفر في الخلفية ----------
+  // ملاحظة مهمة (إصلاح): سابقاً كانت النافذة تنتظر رد السيرفر (fetch) قبل
+  // الظهور، فإن تأخر الاتصال أو فشل بصمت، كانت النافذة لا تظهر إطلاقاً
+  // ويبدو الزر وكأنه "لا يستجيب". الآن: تُفتح النافذة ويبدأ الفيديو والعداد
+  // فوراً عند الضغط (بدون أي انتظار)، بينما يُطلب توثيق الجلسة من السيرفر
+  // بالتوازي في الخلفية. أي خطأ في الاتصال يظهر كرسالة واضحة داخل النافذة
+  // نفسها بدل أن يختفي بصمت في console فقط.
+  function openWatchModal() {
+    claimStatusText.classList.add('hidden');
+    resetClaimButton();
+    currentSessionId = null;
+    secondsLeft = REQUIRED_WATCH_SECONDS;
+
+    // إظهار فوري: النافذة + الفيديو + العداد، بدون انتظار الشبكة
+    watchVideo.src = WATCH_VIDEO_URL;
+    watchModal.classList.remove('hidden');
+    // إعادة تشغيل الفيديو من البداية في كل مرة تُفتح فيها النافذة
+    watchVideo.currentTime = 0;
+    watchVideo.play().catch((err) => console.warn('تعذر التشغيل التلقائي، يمكن للمستخدم الضغط تشغيل يدوياً:', err));
+    startCountdown();
+
+    // توثيق وقت البدء الحقيقي من السيرفر (بالتوازي، لا يُحجب عليه ظهور الواجهة)
+    fetch('/api/start-watch', { method: 'POST' })
+      .then((res) => {
+        if (!res.ok) throw new Error('start-watch failed with status ' + res.status);
+        return res.json();
+      })
+      .then((data) => {
+        currentSessionId = data.session_id;
+      })
+      .catch((err) => {
+        console.error('تعذّر بدء جلسة المشاهدة الموثّقة:', err);
+        claimStatusText.textContent = '⚠️ تعذر الاتصال بالسيرفر لتوثيق المشاهدة. تأكد أن السيرفر (main.py) يعمل، أغلق النافذة وأعد المحاولة.';
+        claimStatusText.className = 'text-center text-sm text-red-400';
+        claimStatusText.classList.remove('hidden');
+      });
+  }
+
+  function closeWatchModal() {
+    watchModal.classList.add('hidden');
+    watchVideo.pause();
+    watchVideo.src = ""; // إيقاف تشغيل الفيديو فعلياً وتحرير الموارد عند الإغلاق
+    clearInterval(countdownInterval);
+  }
+
+  // ---------- 3) العداد التنازلي (60 ثانية) في الواجهة ----------
+  // هذا العداد لأغراض تجربة المستخدم (UX) فقط، أي يمنعه من الضغط على الزر
+  // بصرياً قبل انتهاء الوقت. الحماية الحقيقية ضد التحايل تحدث في السيرفر
+  // داخل /api/claim-points عبر التحقق من الوقت الفعلي المنقضي.
+  function startCountdown() {
+    clearInterval(countdownInterval);
+    countdownDisplay.textContent = secondsLeft;
+
+    countdownInterval = setInterval(() => {
+      secondsLeft -= 1;
+      countdownDisplay.textContent = Math.max(secondsLeft, 0);
+
+      if (secondsLeft <= 0) {
+        clearInterval(countdownInterval);
+        enableClaimButton();
+      }
+    }, 1000);
+  }
+
+  function enableClaimButton() {
+    claimPointsBtn.disabled = false;
+    claimPointsBtn.textContent = "استلم 10 نقاط الآن ✅";
+    claimPointsBtn.className = "w-full py-3.5 rounded-2xl font-black text-lg transition bg-gradient-to-l from-emerald-500 to-teal-500 text-white hover:scale-[1.01]";
+  }
+
+  function resetClaimButton() {
+    claimPointsBtn.disabled = true;
+    claimPointsBtn.textContent = "انتظر انتهاء المشاهدة...";
+    claimPointsBtn.className = "w-full py-3.5 rounded-2xl font-black text-lg transition bg-slate-700 text-slate-400 cursor-not-allowed";
+  }
+
+  // ---------- 4) إرسال طلب استلام النقاط إلى السيرفر ----------
+  async function claimPoints() {
+    if (!currentSessionId) {
+      // لم تصل بعد جلسة موثّقة من السيرفر (أو فشل الاتصال بالكامل)
+      claimStatusText.textContent = '⚠️ تعذر توثيق جلسة المشاهدة مع السيرفر. أغلق النافذة وأعد المحاولة.';
+      claimStatusText.className = 'text-center text-sm text-red-400';
+      claimStatusText.classList.remove('hidden');
+      return;
+    }
+
+    claimPointsBtn.disabled = true;
+    claimPointsBtn.textContent = "⏳ جاري التحقق...";
+
+    try {
+      const res = await fetch('/api/claim-points', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ session_id: currentSessionId }),
+      });
+      const data = await res.json();
+
+      if (!res.ok) {
+        // السيرفر رفض الطلب (مثلاً: لم تمر 60 ثانية فعلياً)
+        claimStatusText.textContent = `⚠️ ${data.detail}`;
+        claimStatusText.className = "text-center text-sm text-red-400";
+        claimStatusText.classList.remove('hidden');
+        enableClaimButton();
+        return;
+      }
+
+      // نجاح: تحديث الرصيد فوراً في كل أماكن عرضه بدون إعادة تحميل الصفحة
+      points = data.points;
+      updatePointsUI();
+
+      claimStatusText.textContent = `🎉 ${data.message} (+${data.earned} نقاط)`;
+      claimStatusText.className = "text-center text-sm text-emerald-400";
+      claimStatusText.classList.remove('hidden');
+
+      claimPointsBtn.textContent = "تم الاستلام ✅";
+      currentSessionId = null;
+
+      setTimeout(closeWatchModal, 1500);
+    } catch (err) {
+      console.error('تعذّر استلام النقاط:', err);
+      claimStatusText.textContent = "⚠️ حدث خطأ في الاتصال بالسيرفر";
+      claimStatusText.className = "text-center text-sm text-red-400";
+      claimStatusText.classList.remove('hidden');
+      enableClaimButton();
+    }
+  }
+
+  // ربط صارم لزر "كسب نقاط مجانية": نتحقق من وجود العنصر فعلياً في الصفحة
+  // قبل الربط، ونطبع خطأ واضحاً في الـ console إن كان مفقوداً (بدل فشل صامت).
+  if (earnPointsBtn) {
+    earnPointsBtn.addEventListener('click', openWatchModal);
+  } else {
+    console.error('خطأ: لم يتم العثور على زر #earnPointsBtn في الصفحة.');
+  }
+  document.getElementById('closeModalBtn').addEventListener('click', closeWatchModal);
+  claimPointsBtn.addEventListener('click', claimPoints);
+
+  // ============================================================
+  // توليد الفيديو (الخطوة 4) - مرتبط بالسيرفر الحقيقي /generate-video
+  // ============================================================
+  // نسخة طرفية (Client) من تكلفة كل جودة، لعرض تنبيه سريع للمستخدم
+  // قبل إرسال الطلب. التحقق الحقيقي والملزم يبقى على السيرفر دائماً.
+  const QUALITY_COST_CLIENT = { "480p": 5, "720p": 10, "1080p": 20 };
+
+  const generateBtn = document.getElementById('generateBtn');
+  const statusText = document.getElementById('statusText');
+
+  function setStatus(message, type = 'info') {
+    const colors = {
+      info: 'text-slate-400',
+      error: 'text-red-400',
+      success: 'text-emerald-400',
+    };
+    statusText.textContent = message;
+    statusText.className = `text-center text-sm ${colors[type] || colors.info}`;
+    statusText.classList.remove('hidden');
+  }
+
+  function setGenerateButtonLoading(isLoading) {
+    generateBtn.disabled = isLoading;
+    generateBtn.textContent = isLoading
+      ? '⏳ جاري التوليد (قد تتم إعادة محاولة تلقائية عند الازدحام)...'
+      : 'توليد الفيديو الاستثماري 🚀';
+  }
+
+  // إضافة الفيديو المُولَّد حديثاً في أعلى معرض الفيديوهات
+  function addVideoToGallery(videoUrl, promptText) {
+    const grid = document.getElementById('videoGrid');
+    const card = document.createElement('div');
+    card.className = "card rounded-xl overflow-hidden flex flex-col";
+    card.innerHTML = `
+      <div class="aspect-[9/16] bg-black">
+        <video class="w-full h-full object-cover" controls preload="metadata">
+          <source src="${videoUrl}" type="video/mp4">
+        </video>
+      </div>
+      <div class="p-3 space-y-2">
+        <p class="text-xs font-bold text-slate-300 truncate" title="${promptText}">${promptText}</p>
+        <a href="${videoUrl}" download class="block text-center text-xs font-bold bg-slate-800 hover:bg-slate-700 transition rounded-lg py-1.5">
+          ⬇️ تحميل الفيديو
+        </a>
+      </div>
+    `;
+    grid.prepend(card);
+  }
+
+  generateBtn.addEventListener('click', async () => {
+    const prompt = document.getElementById('promptInput').value.trim();
+    const quality = document.getElementById('qualitySelect').value;
+    const aspectRatio = document.getElementById('aspectRatio').value;
+
+    if (!prompt) {
+      setStatus('⚠️ الرجاء كتابة وصف المشهد أولاً', 'error');
+      return;
+    }
+
+    // ---------- فحص كفاية النقاط في الواجهة قبل الإرسال (تجربة مستخدم سريعة) ----------
+    const cost = QUALITY_COST_CLIENT[quality] ?? 999;
+    if (points < cost) {
+      setStatus(`⚠️ رصيدك غير كافٍ. هذا التوليد يحتاج ${cost} نقطة وتملك ${points} فقط. شاهد فيديو لكسب المزيد ⭐`, 'error');
+      return;
+    }
+
+    setGenerateButtonLoading(true);
+    setStatus('⏳ جاري إرسال الطلب إلى محرك التوليد...', 'info');
+
+    try {
+      const res = await fetch('/generate-video', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ prompt, quality, aspect_ratio: aspectRatio }),
+      });
+      const data = await res.json();
+
+      if (!res.ok) {
+        // السيرفر رفض الطلب أو فشل الاتصال بـ Hugging Face - نعرض رسالته مباشرة
+        // (قد تكون: نقاط غير كافية، جودة تحتاج ترقية، النموذج قيد التحميل،
+        //  الخادم مزدحم، أو خطأ اتصال عام)
+        setStatus(`❌ ${data.detail || 'حدث خطأ غير متوقع أثناء توليد الفيديو.'}`, 'error');
+        return;
+      }
+
+      // نجاح: تحديث النقاط فوراً + عرض الفيديو في المعرض بدون إعادة تحميل الصفحة
+      points = data.remaining_points;
+      updatePointsUI();
+      addVideoToGallery(data.video_url, prompt);
+
+      setStatus('✅ تم توليد الفيديو بنجاح! يمكنك مشاهدته في معرض الفيديوهات بالأسفل.', 'success');
+    } catch (err) {
+      console.error('تعذّر الاتصال بالسيرفر لتوليد الفيديو:', err);
+      setStatus('❌ تعذر الاتصال بالسيرفر. تأكد من أن السيرفر يعمل وحاول مجدداً.', 'error');
+    } finally {
+      setGenerateButtonLoading(false);
+    }
+  });
+
+  // ============================================================
+  // بوابة الدفع التجريبية (Sandbox) - الخطوة 5
+  // ============================================================
+  const PAYMENT_PLANS_CLIENT = {
+    medium: { label: 'الباقة المتوسطة', price: '15,000 د.ع' },
+    pro: { label: 'الباقة الاحترافية', price: '35,000 د.ع' },
+  };
+  const GATEWAY_LABELS_CLIENT = {
+    zaincash: 'Zain Cash',
+    asiahawala: 'AsiaHawala',
+    qicard: 'Qi Card',
+  };
+
+  let checkoutContext = { plan: null, gateway: null };
+
+  const checkoutModal = document.getElementById('checkoutModal');
+  const checkoutTitle = document.getElementById('checkoutTitle');
+  const checkoutSubtitle = document.getElementById('checkoutSubtitle');
+  const walletNumberInput = document.getElementById('walletNumberInput');
+  const otpInput = document.getElementById('otpInput');
+  const confirmPaymentBtn = document.getElementById('confirmPaymentBtn');
+  const checkoutStatusText = document.getElementById('checkoutStatusText');
+
+  function openCheckoutModal(plan, gateway) {
+    checkoutContext = { plan, gateway };
+    checkoutTitle.textContent = `الدفع عبر ${GATEWAY_LABELS_CLIENT[gateway]}`;
+    checkoutSubtitle.textContent = `ترقية إلى ${PAYMENT_PLANS_CLIENT[plan].label} - ${PAYMENT_PLANS_CLIENT[plan].price}`;
+    walletNumberInput.value = '';
+    otpInput.value = '';
+    checkoutStatusText.classList.add('hidden');
+    resetConfirmPaymentButton();
+    checkoutModal.classList.remove('hidden');
+  }
+
+  function closeCheckoutModal() {
+    checkoutModal.classList.add('hidden');
+  }
+
+  function resetConfirmPaymentButton() {
+    confirmPaymentBtn.disabled = false;
+    confirmPaymentBtn.textContent = 'تأكيد الدفع ✅';
+  }
+
+  // ربط كل أزرار الدفع في بطاقات الأسعار بفتح المودال بالبيانات الصحيحة
+  document.querySelectorAll('.payment-btn').forEach((btn) => {
+    btn.addEventListener('click', () => {
+      openCheckoutModal(btn.dataset.plan, btn.dataset.gateway);
+    });
+  });
+
+  document.getElementById('closeCheckoutModalBtn').addEventListener('click', closeCheckoutModal);
+
+  confirmPaymentBtn.addEventListener('click', async () => {
+    const walletNumber = walletNumberInput.value.trim();
+    const otp = otpInput.value.trim();
+
+    if (!walletNumber || !otp) {
+      checkoutStatusText.textContent = '⚠️ الرجاء تعبئة رقم المحفظة ورمز التحقق.';
+      checkoutStatusText.className = 'text-center text-sm text-red-400';
+      checkoutStatusText.classList.remove('hidden');
+      return;
+    }
+
+    confirmPaymentBtn.disabled = true;
+    confirmPaymentBtn.textContent = '⏳ جاري التحقق من الدفع...';
+
+    try {
+      const res = await fetch('/api/checkout', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          plan: checkoutContext.plan,
+          gateway: checkoutContext.gateway,
+          wallet_number: walletNumber,
+          otp,
+        }),
+      });
+      const data = await res.json();
+
+      if (!res.ok) {
+        checkoutStatusText.textContent = `❌ ${data.detail}`;
+        checkoutStatusText.className = 'text-center text-sm text-red-400';
+        checkoutStatusText.classList.remove('hidden');
+        resetConfirmPaymentButton();
+        return;
+      }
+
+      // نجاح: تحديث الباقة والنقاط في كل الواجهة فوراً بدون إعادة تحميل الصفحة
+      userPlan = data.plan;
+      points = data.points;
+      updatePointsUI();
+      updatePlanBadge();
+
+      checkoutStatusText.textContent = `🎉 ${data.message}`;
+      checkoutStatusText.className = 'text-center text-sm text-emerald-400';
+      checkoutStatusText.classList.remove('hidden');
+      confirmPaymentBtn.textContent = 'تمت الترقية ✅';
+
+      setTimeout(closeCheckoutModal, 2000);
+    } catch (err) {
+      console.error('تعذّر الاتصال بالسيرفر للدفع:', err);
+      checkoutStatusText.textContent = '❌ تعذر الاتصال بالسيرفر. حاول مجدداً.';
+      checkoutStatusText.className = 'text-center text-sm text-red-400';
+      checkoutStatusText.classList.remove('hidden');
+      resetConfirmPaymentButton();
+    }
+  });
+
+  // ---------- تسجيل الدخول ----------
+  document.getElementById('authBtn').addEventListener('click', function() {
+    this.textContent = this.textContent === 'تسجيل الدخول' ? 'تسجيل الخروج' : 'تسجيل الدخول';
+  });
+
+  loadUserStatus();
+</script>
+</body>
+</html>
