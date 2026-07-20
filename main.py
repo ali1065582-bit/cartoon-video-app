@@ -274,7 +274,15 @@ def _get_r2_client():
 def _upload_video_to_r2_sync(video_bytes: bytes) -> str:
     client = _get_r2_client()
     key = f"generated/{uuid.uuid4().hex}.mp4"
-    client.put_object(Bucket=R2_BUCKET_NAME, Key=key, Body=video_bytes, ContentType="video/mp4")
+    try:
+        client.put_object(Bucket=R2_BUCKET_NAME, Key=key, Body=video_bytes, ContentType="video/mp4")
+    except Exception as exc:  # noqa: BLE001 - نلتقط أي خطأ boto3 حقيقي ونعرضه بصدق
+        raise VideoGenerationError(
+            f"⚠️ فشل رفع الفيديو إلى Cloudflare R2: {exc}. "
+            "تأكد أن R2_ACCESS_KEY_ID وR2_SECRET_ACCESS_KEY وR2_BUCKET_NAME صحيحة "
+            "ومطابقة لبعضها في إعدادات بيئة Vercel.",
+            status_code=502,
+        )
     return f"{R2_PUBLIC_URL_BASE.rstrip('/')}/{key}"
 
 
