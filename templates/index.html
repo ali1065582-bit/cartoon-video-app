@@ -1,58 +1,257 @@
 <!DOCTYPE html>
 <html lang="ar" dir="rtl">
 <head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>منصة توليد الفيديوهات الكرتونية - باقة PRO</title>
-    <link href="https://jsdelivr.net" rel="stylesheet">
-    <style>
-        body { background-color: #121212; color: #ffffff; font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; }
-        .main-container { max-width: 800px; margin: 50px auto; padding: 30px; background: #1e1e1e; border-radius: 15px; box-shadow: 0 8px 24px rgba(0,0,0,0.5); }
-        .btn-pro { background: linear-gradient(45deg, #007bff, #00ffcc); border: none; color: #fff; font-weight: bold; padding: 12px; }
-        .btn-pro:hover { background: linear-gradient(45deg, #0056b3, #00cc99); color: #fff; }
-        .video-box { background: #000; border-radius: 10px; height: 350px; display: flex; align-items: center; justify-content: center; margin-top: 20px; border: 2px dashed #333; }
-        .badge-pro { background-color: #ffc107; color: #000; font-weight: bold; }
-    </style>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>محرك توليد وفصل الفيديوهات الكرتونية الذكي | Smart Cartoon Video Engine</title>
+<link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Tajawal:wght@400;500;700;900&display=swap" rel="stylesheet">
+<style>
+  body { font-family: 'Tajawal', sans-serif; background: linear-gradient(135deg, #0f172a 0%, #1e1b4b 50%, #0f172a 100%); color: #f1f5f9; min-height: 100vh; }
+  .card-glass { background: rgba(30, 27, 75, 0.45); backdrop-filter: blur(12px); border: 1px solid rgba(148, 163, 184, 0.15); border-radius: 1rem; }
+  textarea.form-control, .form-control { background: rgba(15, 23, 42, 0.7); color: #f1f5f9; border: 1px solid #334155; }
+  textarea.form-control:focus, .form-control:focus { background: rgba(15, 23, 42, 0.9); color: #f1f5f9; border-color: #a855f7; box-shadow: 0 0 0 .25rem rgba(168,85,247,.25); }
+  .btn-generate { background: linear-gradient(90deg, #7c3aed, #db2777); border: none; font-weight: 900; }
+  .btn-generate:hover { opacity: .92; color: #fff; }
+  .badge-plan { font-size: 1rem; padding: .6em 1em; }
+  .plan-card { border: 1px solid rgba(148,163,184,.2); border-radius: .75rem; padding: 1.25rem; height: 100%; }
+  .gateway-btn { display: flex; align-items: center; justify-content: center; gap: .4rem; font-weight: 700; }
+  .btn-zaincash { background: #fdd835; color: #1e1b4b; border: none; }
+  .btn-asiahawala { background: #16a34a; color: #fff; border: none; }
+  .btn-qicard { background: #2563eb; color: #fff; border: none; }
+  .modal-content { background: #1e1b4b; color: #f1f5f9; }
+  .modal-content .form-control { background: rgba(15,23,42,.7); color:#f1f5f9; border:1px solid #334155; }
+</style>
 </head>
 <body>
-    <div class="container">
-        <div class="main-container text-center">
-            <h1 class="mb-4">🎬 محرك توليد وفصل الفيديوهات الكرتونية الذكي</h1>
-            <div class="alert alert-info py-2">✨ مستقرة أونلاين لعام 2026 بنجاح يا مدير نهاد</div>
-            <div class="d-flex justify-content-center mb-4">
-                <span class="badge badge-pro p-2 fs-6">👑 باقة المليون المفعّلة: PRO (1080p)</span>
-            </div>
-            <div class="text-start">
-                <label class="form-label fw-bold">✍️ اكتب سيناريو أو قصة الفيديو الكرتوني بالتفصيل:</label>
-                <textarea id="promptInput" class="form-control bg-dark text-white border-secondary mb-3" rows="5" placeholder="مثال: أرنب صغير سريع يتسابق مع سلحفاة ذكية وسط غابة خضراء مشمسة بأسلوب ديزني كرتوني عالي الجودة..."></textarea>
-                <button onclick="generateVideo()" class="btn btn-pro w-100 fs-5 mb-3">🚀 توليد وفصل الفيديو المتسلسل بدقة 1080p</button>
-            </div>
-            <div id="loadingStatus" class="mt-3 d-none">
-                <div class="spinner-border text-info" role="status"></div>
-                <p class="mt-2 text-info">⚙️ جاري تشغيل خوارزمية التجميع المتسلسل وفصل المشاهد عبر ByteDance الحقيقي...</p>
-            </div>
-            <div id="resultBox" class="d-none">
-                <h4 class="text-success mt-4">🎉 تم توليد وفصل الفيديو بنجاح!</h4>
-                <div class="video-box">
-                    <video width="100%" height="100%" controls>
-                        <source src="https://w3schools.com" type="video/mp4">
-                        متصفحك لا يدعم تشغيل الفيديو.
-                    </video>
-                </div>
-            </div>
-        </div>
+<div class="container py-5" style="max-width: 720px;">
+
+  <div class="text-center mb-4">
+    <h1 class="fw-black">🎬 محرك توليد وفصل الفيديوهات الكرتونية الذكي</h1>
+    <p class="text-secondary mb-0">AI Cartoon Video Generation &amp; Segmentation Engine</p>
+  </div>
+
+  <div class="text-center mb-4">
+    {% if user.is_unlimited or user.plan == 'pro' %}
+      <span class="badge bg-warning text-dark badge-plan">👑 باقة PRO مفعّلة (1080p) — {{ user.points }} نقطة</span>
+    {% elif user.plan == 'medium' %}
+      <span class="badge bg-info text-dark badge-plan">⚡ الباقة المتوسطة (720p) — {{ user.points }} نقطة</span>
+    {% else %}
+      <span class="badge bg-secondary badge-plan">🆓 الباقة المجانية (480p) — {{ user.points }} نقطة</span>
+    {% endif %}
+  </div>
+
+  <div class="card-glass p-4 mb-4">
+    <label class="form-label fw-bold">📝 اكتب سيناريو أو قصة الفيديو الكرتوني</label>
+    <label class="form-label text-secondary small">Write your cartoon video script or story</label>
+    <textarea id="promptInput" class="form-control mb-3" rows="6"
+      placeholder="مثال: مغامرة أرنب صغير يبحث عن جزرة ذهبية في غابة سحرية..."></textarea>
+
+    <button id="generateBtn" class="btn btn-generate btn-lg w-100 text-white">
+      🚀 توليد وفصل الفيديو المتسلسل بدقة 1080p
+    </button>
+
+    <p class="text-center text-secondary small mt-2 mb-0">
+      ⚡ اتصال حقيقي بمحرك ByteDance السحابي المجاني - قد تحدث إعادة محاولة تلقائية عند الازدحام.
+    </p>
+
+    <div id="statusBox" class="mt-3 d-none"></div>
+
+    <div id="spinnerBox" class="text-center my-4 d-none">
+      <div class="spinner-border text-light" role="status" style="width:3rem;height:3rem;"></div>
+      <p class="mt-3 text-secondary" id="spinnerText">⏳ جاري الاتصال بمحرك التوليد الحقيقي...</p>
     </div>
-    <script>
-        function generateVideo() {
-            const prompt = document.getElementById('promptInput').value;
-            if(!prompt) { alert('الرجاء كتابة قصة أو نص أولاً يا مدير!'); return; }
-            document.getElementById('loadingStatus').classList.remove('d-none');
-            document.getElementById('resultBox').classList.add('d-none');
-            setTimeout(() => {
-                document.getElementById('loadingStatus').classList.add('d-none');
-                document.getElementById('resultBox').classList.remove('d-none');
-            }, 4000);
-        }
-    </script>
+
+    <div id="videoBox" class="mt-4 d-none">
+      <h5 class="mb-2">🎞️ الفيديو الناتج</h5>
+      <video id="resultVideo" class="w-100 rounded" controls></video>
+      <a id="downloadLink" class="btn btn-outline-success mt-2 w-100" download>⬇️ تحميل الفيديو</a>
+    </div>
+  </div>
+
+  <div class="card-glass p-4 mb-4">
+    <h5 class="fw-bold mb-1">💳 شحن النقاط وترقية الباقة</h5>
+    <p class="text-secondary small mb-3">
+      ⚠️ وضع تجريبي (Sandbox) - رمز التحقق التجريبي: <code>123456</code>. تحديث الباقة يحدث فعلياً في قاعدة البيانات.
+    </p>
+    <div class="row g-3">
+      <div class="col-md-6">
+        <div class="plan-card">
+          <h6 class="fw-bold">⚡ الباقة المتوسطة (720p)</h6>
+          <p class="text-secondary small mb-2">100 نقطة — 5,000 د.ع</p>
+          <div class="d-grid gap-2">
+            <button class="btn gateway-btn btn-zaincash" data-plan="medium" data-gateway="zaincash">Zain Cash</button>
+            <button class="btn gateway-btn btn-asiahawala" data-plan="medium" data-gateway="asiahawala">AsiaHawala</button>
+            <button class="btn gateway-btn btn-qicard" data-plan="medium" data-gateway="qicard">Qi Card</button>
+          </div>
+        </div>
+      </div>
+      <div class="col-md-6">
+        <div class="plan-card">
+          <h6 class="fw-bold">👑 باقة PRO السينمائية (1080p)</h6>
+          <p class="text-secondary small mb-2">500 نقطة + غير محدود — 15,000 د.ع</p>
+          <div class="d-grid gap-2">
+            <button class="btn gateway-btn btn-zaincash" data-plan="pro" data-gateway="zaincash">Zain Cash</button>
+            <button class="btn gateway-btn btn-asiahawala" data-plan="pro" data-gateway="asiahawala">AsiaHawala</button>
+            <button class="btn gateway-btn btn-qicard" data-plan="pro" data-gateway="qicard">Qi Card</button>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="text-center">
+    <a href="/admin" class="text-secondary small text-decoration-none">🔐 لوحة التحكم →</a>
+  </div>
+</div>
+
+<div class="modal fade" id="checkoutModal" tabindex="-1">
+  <div class="modal-dialog modal-dialog-centered">
+    <div class="modal-content p-3">
+      <div class="modal-header border-0">
+        <h5 class="modal-title" id="checkoutTitle">إتمام الدفع</h5>
+        <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
+      </div>
+      <div class="modal-body">
+        <p class="text-secondary small" id="checkoutSubtitle"></p>
+        <label class="form-label small">رقم الهاتف</label>
+        <input type="tel" id="checkoutPhone" class="form-control mb-3" placeholder="07xxxxxxxxx">
+        <label class="form-label small">رمز التحقق (OTP) — تجريبي: 123456</label>
+        <input type="text" id="checkoutOtp" class="form-control mb-3" placeholder="123456">
+        <div id="checkoutStatus" class="d-none mb-2"></div>
+        <button id="checkoutConfirmBtn" class="btn btn-generate w-100 text-white fw-bold">تأكيد الدفع</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"></script>
+<script>
+  const generateBtn = document.getElementById('generateBtn');
+  const spinnerBox = document.getElementById('spinnerBox');
+  const spinnerText = document.getElementById('spinnerText');
+  const videoBox = document.getElementById('videoBox');
+  const statusBox = document.getElementById('statusBox');
+  const resultVideo = document.getElementById('resultVideo');
+  const downloadLink = document.getElementById('downloadLink');
+
+  function setStatus(message, type) {
+    statusBox.textContent = message;
+    statusBox.className = 'mt-3 alert alert-' + (type || 'secondary');
+  }
+
+  generateBtn.addEventListener('click', async () => {
+    const prompt = document.getElementById('promptInput').value.trim();
+    if (!prompt) {
+      setStatus('⚠️ الرجاء كتابة سيناريو الفيديو أولاً', 'warning');
+      return;
+    }
+
+    statusBox.classList.add('d-none');
+    videoBox.classList.add('d-none');
+    spinnerBox.classList.remove('d-none');
+    spinnerText.textContent = '⏳ جاري الاتصال بمحرك التوليد الحقيقي (قد يستغرق حتى دقيقة بسبب إعادة المحاولة التلقائية)...';
+    generateBtn.disabled = true;
+
+    try {
+      // اتصال حقيقي 100% بـ /generate-video - لا يوجد أي محاكاة أو نتيجة وهمية هنا
+      const res = await fetch('/generate-video', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ prompt, quality: '1080p' }),
+      });
+      const data = await res.json();
+
+      spinnerBox.classList.add('d-none');
+
+      if (!res.ok) {
+        // فشل حقيقي (نقاط غير كافية، جودة تحتاج ترقية، ازدحام، إلخ) - نعرضه بصدق
+        setStatus('❌ ' + (data.detail || 'حدث خطأ غير متوقع أثناء توليد الفيديو.'), 'danger');
+        return;
+      }
+
+      resultVideo.src = data.video_url;
+      downloadLink.href = data.video_url;
+      videoBox.classList.remove('d-none');
+      setStatus('✅ تم توليد الفيديو فعلياً عبر محرك ByteDance السحابي المجاني.', 'success');
+    } catch (err) {
+      spinnerBox.classList.add('d-none');
+      setStatus('❌ تعذر الاتصال بالسيرفر: ' + err.message, 'danger');
+    } finally {
+      generateBtn.disabled = false;
+    }
+  });
+
+  // ============================================================
+  // نموذج الدفع (Sandbox) - اتصال حقيقي بـ /api/checkout، يحدّث القاعدة فعلياً
+  // ============================================================
+  const checkoutModalEl = document.getElementById('checkoutModal');
+  const checkoutModal = new bootstrap.Modal(checkoutModalEl);
+  const checkoutTitle = document.getElementById('checkoutTitle');
+  const checkoutSubtitle = document.getElementById('checkoutSubtitle');
+  const checkoutPhone = document.getElementById('checkoutPhone');
+  const checkoutOtp = document.getElementById('checkoutOtp');
+  const checkoutStatus = document.getElementById('checkoutStatus');
+  const checkoutConfirmBtn = document.getElementById('checkoutConfirmBtn');
+
+  const GATEWAY_LABELS = { zaincash: 'Zain Cash', asiahawala: 'AsiaHawala', qicard: 'Qi Card' };
+  let selectedPlan = null;
+  let selectedGateway = null;
+
+  document.querySelectorAll('.gateway-btn').forEach((btn) => {
+    btn.addEventListener('click', () => {
+      selectedPlan = btn.dataset.plan;
+      selectedGateway = btn.dataset.gateway;
+      checkoutTitle.textContent = `الدفع عبر ${GATEWAY_LABELS[selectedGateway]}`;
+      checkoutSubtitle.textContent = `باقة: ${selectedPlan === 'pro' ? 'PRO السينمائية' : 'المتوسطة'} — وضع تجريبي (Sandbox)`;
+      checkoutPhone.value = '';
+      checkoutOtp.value = '';
+      checkoutStatus.classList.add('d-none');
+      checkoutModal.show();
+    });
+  });
+
+  checkoutConfirmBtn.addEventListener('click', async () => {
+    const phone = checkoutPhone.value.trim();
+    const otp = checkoutOtp.value.trim();
+
+    if (!phone || !otp) {
+      checkoutStatus.textContent = '⚠️ الرجاء إدخال رقم الهاتف ورمز التحقق.';
+      checkoutStatus.className = 'alert alert-warning mb-2';
+      return;
+    }
+
+    checkoutConfirmBtn.disabled = true;
+    checkoutConfirmBtn.textContent = '⏳ جاري التحقق...';
+
+    try {
+      // اتصال حقيقي بـ /api/checkout - يحدّث النقاط/الباقة فعلياً في قاعدة البيانات
+      const res = await fetch('/api/checkout', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ plan: selectedPlan, gateway: selectedGateway, phone, otp }),
+      });
+      const data = await res.json();
+
+      if (!res.ok) {
+        checkoutStatus.textContent = '❌ ' + (data.detail || 'فشل الدفع.');
+        checkoutStatus.className = 'alert alert-danger mb-2';
+        return;
+      }
+
+      checkoutStatus.textContent = data.message;
+      checkoutStatus.className = 'alert alert-success mb-2';
+      setTimeout(() => window.location.reload(), 1500);
+    } catch (err) {
+      checkoutStatus.textContent = '❌ تعذر الاتصال بالسيرفر: ' + err.message;
+      checkoutStatus.className = 'alert alert-danger mb-2';
+    } finally {
+      checkoutStatus.classList.remove('d-none');
+      checkoutConfirmBtn.disabled = false;
+      checkoutConfirmBtn.textContent = 'تأكيد الدفع';
+    }
+  });
+</script>
 </body>
 </html>
