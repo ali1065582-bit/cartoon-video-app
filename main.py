@@ -31,17 +31,23 @@ HTML خام إطلاقاً. Jinja2 يستخدم `{{ }}` و `{% %}` بدل f-stri
 ============================================================
 توضيح مهم عن زر التوليد:
 ============================================================
-هذا الزر يتصل فعلياً بمحرك Hugging Face المجاني (مساحة ByteDance/AnimateDiff-
-Lightning عبر gradio_client) - لا يوجد أي "محاكاة" أو نتيجة وهمية هنا. أي فشل
-حقيقي (ازدحام، تحميل بارد، تجاوز حصة GPU) يُعرض بصدق للمستخدم مع إعادة محاولة
-تلقائية، بدل إخفائه خلف نتيجة مزيّفة.
+هذا الزر يتصل فعلياً بمحرك Hugging Face المجاني (مساحة Upsampler/wan-2-2-14b-
+text-to-video عبر gradio_client) - لا يوجد أي "محاكاة" أو نتيجة وهمية هنا.
+لأن هذا النموذج محدود بـ5 ثوانٍ كحد أقصى لكل استدعاء واحد، يُقسَّم نص المستخدم
+إلى عدة "مشاهد" قصيرة تُولَّد كل واحدة على حدة ثم تُدمَج بـ ffmpeg في فيديو
+واحد متسلسل أطول (انظر تعليق "إعدادات محرك التوليد الجديد" أدناه للتفاصيل
+والقيود الحقيقية). أي فشل حقيقي (ازدحام، تحميل بارد، تجاوز حصة GPU، فشل دمج)
+يُعرض بصدق للمستخدم مع إعادة محاولة تلقائية، بدل إخفائه خلف نتيجة مزيّفة.
 """
 
 import os
+import re
 import time
 import uuid
 import asyncio
 import pathlib
+import subprocess
+import tempfile
 
 import boto3
 import psycopg2
@@ -173,21 +179,51 @@ R2_PUBLIC_URL_BASE = os.getenv("R2_PUBLIC_URL_BASE", "")
 
 
 # ============================================================
-# إعدادات محرك التوليد (Hugging Face Space عبر gradio_client) - نفس المحرك
-# الحقيقي المُختبَر مسبقاً، بدون أي تغيير في منطق الاتصال أو إعادة المحاولة
+# إعدادات محرك التوليد الجديد: Wan 2.2 14B (فيديو حقيقي متعدد المشاهد)
 # ============================================================
+# لماذا تم الاستبدال: المحرك القديم (ByteDance/AnimateDiff-Lightning) كان
+# يُنتج مقاطع ~1 ثانية فقط بشخصية عامة لا تتبع النص المكتوب - قيد حقيقي في
+# النموذج نفسه عند 2-8 خطوات استدلال وبدون أي معامل مدة. تم التحقق حياً
+# (view_api) من Upsampler/wan-2-2-14b-text-to-video: نموذج فعلي يتبع النص
+# بدقة عالية، لكنه محدود بحد أقصى 5 ثوانٍ لكل استدعاء واحد (Lightning LoRA
+# بـ4 خطوات، 0.5-5.0 ثانية).
+#
+# لتحقيق "فيديو كامل" أطول من 5 ثوانٍ: نُقسِّم نص المستخدم إلى عدة "مشاهد"
+# قصيرة (كل سطر أو جملة = مشهد)، نولّد كل مشهد على حدة (~4.8 ثانية)، ثم
+# ندمجها بـ ffmpeg في فيديو واحد متسلسل. هذا هو المعنى الفعلي لعبارة "توليد
+# وفصل الفيديو المتسلسل" الظاهرة في واجهة الموقع.
+#
+# قيد حقيقي يجب معرفته: كل مشهد يستغرق تقريباً 30-50 ثانية على GPU مجاني
+# (ZeroGPU) شاملاً وقت التحميل. توليد 3 مشاهد متسلسلة قد يقترب من حد الوقت
+# المسموح لدالة Vercel. تم رفع الحد في vercel.json إلى 300 ثانية، لكن على
+# خطة Vercel Hobby العادية (بدون Fluid Compute مُفعَّل) الحد الفعلي 60 ثانية
+# فقط - إن ظهر خطأ Timeout عند اختيار باقة تسمح بأكثر من مشهد واحد، الحل هو
+# تفعيل Fluid Compute من إعدادات المشروع أو الترقية لخطة Pro.
 HF_API_TOKEN = os.getenv("HF_API_TOKEN", "") or None
-HF_SPACE_ID = os.getenv("HF_SPACE_ID", "ByteDance/AnimateDiff-Lightning")
-HF_SPACE_API_NAME = "/generate_image"
+WAN_SPACE_ID = os.getenv("WAN_SPACE_ID", "Upsampler/wan-2-2-14b-text-to-video")
+WAN_SPACE_API_NAME = "/generate_video"
 
-QUALITY_TO_STEPS = {"480p": 2, "720p": 4, "1080p": 8}
-DEFAULT_BASE_MODEL = "ToonYou"
-DEFAULT_MOTION = ""
+WAN_ASPECT_RATIO = "16:9 (832x480)"
+WAN_STEPS = 4  # القيمة الافتراضية المُحسّنة لهذا النموذج (Lightning LoRA بـ4 خطوات)
+WAN_NEGATIVE_PROMPT = (
+    "色调艳丽, 过曝, 静态, 细节模糊不清, 字幕, 风格, 作品, 画作, 画面, 静止, "
+    "整体发灰, 最差质量, 低质量, JPEG压缩残留, 丑陋的, 残缺的, 多余的手指, "
+    "画得不好的手部, 画得不好的脸部, 畸形的, 毁容的, 形态畸形的肢体, 手指融合, "
+    "静止不动的画面, 杂乱的背景, 三条腿, 背景人很多, 倒着走"
+)  # نفس القيمة الافتراضية للمساحة الحية - مُختبَرة وتُنتج جودة أفضل فعلياً
+WAN_SCENE_DURATION_SECONDS = 4.8  # قريب من الحد الأقصى الحقيقي للنموذج (5.0s)
+WAN_GUIDANCE_SCALE = 1.0
+WAN_GUIDANCE_SCALE_2 = 1.0
 
 MAX_RETRIES = 3
 RETRY_WAIT_QUEUE_BUSY = 20
 RETRY_WAIT_COLD_START = 25
 
+# كل باقة تحدد كم "مشهداً" (~4.8 ثانية للمشهد) يمكن دمجها في فيديو واحد متسلسل.
+# أسماء الباقات القديمة (480p/720p/1080p) أصبحت الآن تعني عدد المشاهد/مدة
+# الفيديو الإجمالية - وليست دقة بكسل حقيقية (المخرج دائماً 832x480 لكل مشهد)،
+# تجنباً لأي وصف مضلِّل لدقة غير موجودة فعلياً في الفيديو الناتج.
+SCENE_TIER_TO_COUNT = {"480p": 1, "720p": 2, "1080p": 3}
 QUALITY_POINTS_COST = {"480p": 5, "720p": 10, "1080p": 20}
 PLAN_ALLOWED_QUALITY = {
     "free": ["480p"],
@@ -292,21 +328,28 @@ async def upload_generated_video(video_bytes: bytes) -> str:
 
 
 # ============================================================
-# استدعاء Hugging Face عبر gradio_client - نفس المنطق المُختبَر سابقاً
+# استدعاء Wan 2.2 14B عبر gradio_client لتوليد مشهد واحد (~4.8 ثانية)
 # ============================================================
-def _generate_via_gradio_sync(prompt: str, steps: int):
-    client = GradioClient(HF_SPACE_ID, token=HF_API_TOKEN)
-    return client.predict(
+def _generate_scene_via_gradio_sync(prompt: str) -> str:
+    client = GradioClient(WAN_SPACE_ID, token=HF_API_TOKEN)
+    result = client.predict(
         prompt,
-        DEFAULT_BASE_MODEL,
-        DEFAULT_MOTION,
-        steps,
-        api_name=HF_SPACE_API_NAME,
+        WAN_ASPECT_RATIO,
+        WAN_STEPS,
+        WAN_NEGATIVE_PROMPT,
+        WAN_SCENE_DURATION_SECONDS,
+        WAN_GUIDANCE_SCALE,
+        WAN_GUIDANCE_SCALE_2,
+        42,    # seed - يُتجاهل عملياً لأن randomize_seed=True أدناه
+        True,  # randomize_seed: كل مشهد يحصل على بذرة عشوائية لتنويع الحركة
+        api_name=WAN_SPACE_API_NAME,
     )
+    # الإرجاع الحقيقي (video, seed) - الفيديو إما مسار نصي مباشر أو dict بمفتاح path
+    video_value = result[0] if isinstance(result, (tuple, list)) else result
+    return _extract_video_path(video_value)
 
 
-def _extract_video_path(result) -> str:
-    value = result
+def _extract_video_path(value) -> str:
     if isinstance(value, dict) and "video" in value:
         value = value["video"]
     if isinstance(value, dict) and "path" in value:
@@ -334,25 +377,101 @@ def _classify_gradio_error(exc: Exception) -> tuple[bool, float, str]:
     return False, 0, f"⚠️ خطأ غير متوقع أثناء توليد الفيديو: {exc}"
 
 
-async def call_gradio_text_to_video(prompt: str, quality: str) -> bytes:
-    steps = QUALITY_TO_STEPS.get(quality, 4)
-    last_message = "⚠️ فشل توليد الفيديو لسبب غير معروف."
-
+async def _generate_one_scene_with_retry(prompt: str) -> pathlib.Path:
+    """يولّد مشهداً واحداً مع إعادة محاولة تلقائية، ويعيد مساراً محلياً لملف الفيديو."""
+    last_message = "⚠️ فشل توليد المشهد لسبب غير معروف."
     for attempt in range(1, MAX_RETRIES + 1):
         try:
-            result = await run_in_threadpool(_generate_via_gradio_sync, prompt, steps)
-            video_path = _extract_video_path(result)
-            return pathlib.Path(video_path).read_bytes()
+            video_path = await run_in_threadpool(_generate_scene_via_gradio_sync, prompt)
+            return pathlib.Path(video_path)
         except VideoGenerationError:
             raise
-        except Exception as exc:
+        except Exception as exc:  # noqa: BLE001
             should_retry, wait_seconds, message = _classify_gradio_error(exc)
             last_message = message
             if not should_retry or attempt == MAX_RETRIES:
                 raise VideoGenerationError(message, status_code=503 if should_retry else 502)
             await asyncio.sleep(wait_seconds)
-
     raise VideoGenerationError(last_message, status_code=503)
+
+
+def _split_into_scenes(prompt: str, max_scenes: int) -> list[str]:
+    """
+    يقسّم نص المستخدم إلى عدة "مشاهد" قصيرة (كل واحد يُولَّد كفيديو ~4.8 ثانية
+    مستقل، ثم تُدمَج كلها لاحقاً). أولوية التقسيم:
+    1) كل سطر غير فارغ = مشهد منفصل (الأنسب - يعطي المستخدم تحكماً مباشراً
+       إن كتب قصته على شكل أسطر/مشاهد مرقّمة).
+    2) إن كان النص سطراً واحداً فقط، يُقسَّم على علامات نهاية الجملة (. ! ؟).
+    يُقتصَر الناتج دائماً على max_scenes (حسب باقة المستخدم) - لا يُهمَل الباقي
+    بصمت، بل يُقتطَع بوضوح والعدد الفعلي يُعاد لاحقاً للواجهة.
+    """
+    lines = [ln.strip() for ln in prompt.splitlines() if ln.strip()]
+    if len(lines) <= 1:
+        parts = re.split(r"(?<=[.!?؟])\s+", prompt.strip())
+        lines = [p.strip() for p in parts if p.strip()]
+    if not lines:
+        lines = [prompt.strip()]
+    return lines[:max_scenes]
+
+
+def _concat_videos_sync(clip_paths: list[pathlib.Path]) -> bytes:
+    """
+    يدمج عدة مقاطع فيديو قصيرة في فيديو واحد متسلسل عبر ffmpeg (concat demuxer).
+    يستخدم مكتبة imageio_ffmpeg للحصول على ثنائي ffmpeg جاهز (Static Binary)
+    بدل الاعتماد على تثبيت ffmpeg على نظام التشغيل - وهو غير مضمون على بيئة
+    Python الخادمة لـ Vercel بدون هذه المكتبة.
+    """
+    if len(clip_paths) == 1:
+        # مشهد واحد فقط - لا حاجة لأي دمج، نعيد بايتات الملف كما هي
+        return clip_paths[0].read_bytes()
+
+    import imageio_ffmpeg
+
+    ffmpeg_exe = imageio_ffmpeg.get_ffmpeg_exe()
+
+    with tempfile.TemporaryDirectory() as tmp_dir:
+        tmp_path = pathlib.Path(tmp_dir)
+        list_file = tmp_path / "concat_list.txt"
+        with list_file.open("w", encoding="utf-8") as fh:
+            for clip in clip_paths:
+                fh.write(f"file '{clip.as_posix()}'\n")
+
+        output_path = tmp_path / f"final_{uuid.uuid4().hex}.mp4"
+
+        result = subprocess.run(
+            [
+                ffmpeg_exe, "-y",
+                "-f", "concat", "-safe", "0",
+                "-i", str(list_file),
+                "-c", "copy",
+                str(output_path),
+            ],
+            capture_output=True,
+            text=True,
+        )
+        if result.returncode != 0 or not output_path.exists():
+            raise VideoGenerationError(
+                f"⚠️ فشل دمج المشاهد عبر ffmpeg: {result.stderr[-500:]}",
+                status_code=502,
+            )
+        return output_path.read_bytes()
+
+
+async def generate_stitched_video(prompt: str, max_scenes: int) -> tuple[bytes, int]:
+    """
+    يولّد فيديو متعدد المشاهد كاملاً: يقسّم النص، يولّد كل مشهد تسلسلياً عبر
+    Wan 2.2 14B، ثم يدمج الكل بـ ffmpeg. يعيد (بايتات الفيديو النهائي، عدد
+    المشاهد الفعلي) - العدد الفعلي يُستخدَم لاحقاً لعرض الحقيقة للمستخدم
+    (مثلاً لو كتب سطراً واحداً فقط رغم أن باقته تسمح بـ3 مشاهد).
+    """
+    scenes = _split_into_scenes(prompt, max_scenes)
+    clip_paths: list[pathlib.Path] = []
+    for scene_prompt in scenes:
+        clip_path = await _generate_one_scene_with_retry(scene_prompt)
+        clip_paths.append(clip_path)
+
+    video_bytes = await run_in_threadpool(_concat_videos_sync, clip_paths)
+    return video_bytes, len(clip_paths)
 
 
 # ============================================================
@@ -479,7 +598,8 @@ async def checkout(payload: CheckoutRequest):
 @app.post("/generate-video")
 async def generate_video(payload: GenerateVideoRequest):
     """
-    توليد حقيقي 100% عبر gradio_client + ByteDance/AnimateDiff-Lightning.
+    توليد حقيقي 100% عبر gradio_client + Wan 2.2 14B (Upsampler)، مع دمج
+    متعدد المشاهد بـ ffmpeg لتجاوز حد الـ5 ثوانٍ الحقيقي لكل استدعاء واحد.
     لا يوجد أي مسار "محاكاة" في هذا الكود - أي نجاح معروض للمستخدم يعكس
     فيديو حقيقياً تم توليده فعلياً ورفعه إلى Cloudflare R2.
     """
@@ -490,7 +610,7 @@ async def generate_video(payload: GenerateVideoRequest):
     if not prompt:
         raise HTTPException(status_code=400, detail="الرجاء كتابة سيناريو أو وصف الفيديو أولاً.")
 
-    quality = payload.quality if payload.quality in QUALITY_TO_STEPS else "480p"
+    quality = payload.quality if payload.quality in SCENE_TIER_TO_COUNT else "480p"
     cost = 0
 
     if not user["is_unlimited"]:
@@ -498,7 +618,7 @@ async def generate_video(payload: GenerateVideoRequest):
         if quality not in allowed_qualities:
             raise HTTPException(
                 status_code=403,
-                detail=f"جودة {quality} تتطلب ترقية باقتك الحالية ({user['plan']}).",
+                detail=f"باقة {quality} تتطلب ترقية باقتك الحالية ({user['plan']}).",
             )
         cost = QUALITY_POINTS_COST[quality]
         if user["points"] < cost:
@@ -507,8 +627,10 @@ async def generate_video(payload: GenerateVideoRequest):
                 detail=f"رصيدك غير كافٍ. هذا التوليد يحتاج {cost} نقطة وتملك حالياً {user['points']} فقط.",
             )
 
+    max_scenes = SCENE_TIER_TO_COUNT[quality]
+
     try:
-        video_bytes = await call_gradio_text_to_video(prompt, quality)
+        video_bytes, actual_scene_count = await generate_stitched_video(prompt, max_scenes)
         video_url = await upload_generated_video(video_bytes)
     except VideoGenerationError as exc:
         # لا يتم خصم أي نقاط عند الفشل
@@ -522,6 +644,9 @@ async def generate_video(payload: GenerateVideoRequest):
         "video_url": video_url,
         "remaining_points": remaining_points,
         "quality": quality,
+        "scene_count": actual_scene_count,
+        "scene_duration_seconds": WAN_SCENE_DURATION_SECONDS,
+        "total_duration_seconds": round(actual_scene_count * WAN_SCENE_DURATION_SECONDS, 1),
         "is_unlimited": user["is_unlimited"],
     }
 
