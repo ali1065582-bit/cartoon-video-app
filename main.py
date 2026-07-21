@@ -44,6 +44,8 @@ import os
 import re
 import time
 import uuid
+import base64
+import secrets
 import asyncio
 import pathlib
 import subprocess
@@ -53,7 +55,7 @@ import boto3
 import psycopg2
 import psycopg2.extras
 from fastapi import FastAPI, HTTPException, Request
-from fastapi.responses import HTMLResponse
+from fastapi.responses import HTMLResponse, Response
 from fastapi.templating import Jinja2Templates
 from fastapi.concurrency import run_in_threadpool
 from pydantic import BaseModel
@@ -63,6 +65,49 @@ BASE_DIR = pathlib.Path(__file__).parent
 templates = Jinja2Templates(directory=str(BASE_DIR / "templates"))
 
 app = FastAPI(title="AI Cartoon Video Studio")
+
+
+# ============================================================
+# قفل الموقع للاستخدام الشخصي فقط (HTTP Basic Auth على كل المسارات)
+# ============================================================
+# طلب المستخدم: "أغلق التطبيق خلّه لي بس" - أي شخص عنده الرابط حالياً يقدر
+# يفتح الموقع ويستهلك حصة GPU المحدودة (25 دقيقة/يوم حتى مع PRO). الحل
+# الأبسط والمجاني (بدل Vercel Password Protection اللي يكلف $150/شهر): قفل
+# بسيط بكلمة سر عبر HTTP Basic Auth على مستوى التطبيق نفسه.
+#
+# فعّال فقط إذا ضُبط SITE_PASSWORD كمتغير بيئة على Vercel (فشل آمن بالاتجاه
+# المفتوح إن لم يُضبط، حتى لا يُقفل الموقع بالخطأ قبل ضبط كلمة السر عمداً -
+# لكن بمجرد ضبطه، يُطلب تسجيل الدخول لكل صفحة وكل API بدون استثناء).
+SITE_USERNAME = os.getenv("SITE_USERNAME", "admin")
+SITE_PASSWORD = os.getenv("SITE_PASSWORD", "")
+
+
+@app.middleware("http")
+async def personal_access_lock(request: Request, call_next):
+    if not SITE_PASSWORD:
+        # لم يُضبط SITE_PASSWORD بعد - الموقع يبقى مفتوحاً كما كان (لا قفل).
+        return await call_next(request)
+
+    auth_header = request.headers.get("authorization", "")
+    is_valid = False
+    if auth_header.startswith("Basic "):
+        try:
+            decoded = base64.b64decode(auth_header[len("Basic "):]).decode("utf-8")
+            sent_user, _, sent_pass = decoded.partition(":")
+            is_valid = secrets.compare_digest(sent_user, SITE_USERNAME) and secrets.compare_digest(
+                sent_pass, SITE_PASSWORD
+            )
+        except Exception:  # noqa: BLE001 - أي فشل بفك التشفير = دخول مرفوض
+            is_valid = False
+
+    if not is_valid:
+        return Response(
+            content="🔒 هذا التطبيق خاص - أدخل اسم المستخدم وكلمة السر للدخول.",
+            status_code=401,
+            headers={"WWW-Authenticate": "Basic realm=\"cartoon-video-app\""},
+        )
+
+    return await call_next(request)
 
 
 # ============================================================
