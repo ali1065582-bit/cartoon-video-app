@@ -535,16 +535,17 @@ async def generate_stitched_video(prompt: str, max_scenes: int) -> tuple[bytes, 
     هل تم تضمين الصوت فعلاً) - عدد المشاهد الفعلي وحالة الصوت تُستخدَمان لاحقاً
     لعرض الحقيقة الكاملة للمستخدم دون أي ادّعاء غير دقيق.
     """
-    # تحسين أداء (مجاني): توليد كل المشاهد بالتوازي بدل التسلسلي عبر
-    # asyncio.gather. asyncio.gather يحافظ على ترتيب النتائج حسب ترتيب
-    # المهام المُمرَّرة (وليس ترتيب انتهائها)، فالدمج النهائي يبقى بنفس ترتيب
-    # القصة كما كتبها المستخدم. هذا يقلّل الوقت الكلي تقريباً من (مجموع كل
-    # المشاهد) إلى (أطول مشهد واحد + وقت الطابور)، وهو أهم عامل لتفادي تجاوز
-    # مهلة Vercel (خصوصاً مع باقة Pro التي تطلب 8 مشاهد).
+    # ملاحظة مهمة (تم التراجع عن التوازي): جربنا سابقاً توليد المشاهد
+    # بالتوازي عبر asyncio.gather لتقليل الوقت الكلي، لكن اتضح من سجلات
+    # الإنتاج الفعلية أن مساحة ZeroGPU تسمح بطلب GPU واحد فقط في نفس اللحظة
+    # لكل مستخدم/توكن - أي طلب إضافي متزامن يُرفض فوراً برسالة "تجاوز الحصة"
+    # (فشل خلال أقل من ثانية، وليس بعد استهلاك حصة حقيقية). لذلك رجعنا
+    # للتوليد التسلسلي الآمن: مشهد واحد يكتمل قبل بدء التالي.
     scenes = _split_into_scenes(prompt, max_scenes)
-    clip_paths: list[pathlib.Path] = list(
-        await asyncio.gather(*(_generate_one_scene_with_retry(s) for s in scenes))
-    )
+    clip_paths: list[pathlib.Path] = []
+    for scene_prompt in scenes:
+        clip_path = await _generate_one_scene_with_retry(scene_prompt)
+        clip_paths.append(clip_path)
 
     video_bytes = await run_in_threadpool(_concat_videos_sync, clip_paths)
 
