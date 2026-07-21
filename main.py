@@ -463,12 +463,77 @@ def _concat_videos_sync(clip_paths: list[pathlib.Path]) -> bytes:
         return output_path.read_bytes()
 
 
-async def generate_stitched_video(prompt: str, max_scenes: int) -> tuple[bytes, int]:
+# ============================================================
+# الرواية الصوتية (Narration) - تحويل نص القصة إلى صوت عربي حقيقي عبر gTTS
+# ============================================================
+# gTTS مكتبة مجانية حقيقية تستخدم واجهة Google Translate الصوتية غير الرسمية
+# (وليست Google Cloud Text-to-Speech المدفوعة) - سريعة (ثوانٍ) ولا تحتاج طابور
+# GPU، لكنها اعتماد على خدمة مجانية غير مضمونة الاستقرار 100%. لهذا فشل توليد
+# الصوت لا يُسقط الطلب بالكامل: يُعاد الفيديو صامتاً مع الإفصاح الصريح بذلك،
+# بدل ادّعاء نجاح كامل غير حقيقي.
+#
+# قرار تصميم مهم: تُولَّد رواية صوتية واحدة لكامل نص القصة (كل الأسطر مجتمعة)
+# وتُلصَق فوق الفيديو النهائي المدموج، بدل توليد صوت منفصل لكل مشهد ومزامنته
+# بدقة - الخيار الأول أبسط وأكثر موثوقية هندسياً، لكن معناه أن توقيت الصوت لكل
+# مشهد تقريبي وليس متزامناً إطاراً بإطار مع الصورة.
+NARRATION_LANG = "ar"
+
+
+def _generate_narration_sync(full_text: str) -> pathlib.Path:
+    from gtts import gTTS
+
+    tmp_dir = pathlib.Path(tempfile.mkdtemp())
+    narration_path = tmp_dir / f"narration_{uuid.uuid4().hex}.mp3"
+    gTTS(text=full_text, lang=NARRATION_LANG).save(str(narration_path))
+    return narration_path
+
+
+def _mux_narration_sync(video_bytes: bytes, narration_path: pathlib.Path) -> bytes:
+    """
+    يلصق مسار الصوت (الرواية) فوق الفيديو الصامت المدموج عبر ffmpeg.
+    يستخدم -shortest: إن كان الصوت أطول من الفيديو يُقتَص عند نهاية الفيديو
+    (قد تُقطَع الرواية قبل اكتمالها لو كان نص القصة طويلاً جداً)، وإن كان
+    الفيديو أطول يستمر صامتاً بعد انتهاء الرواية - هذا حل واقعي بسيط بدل
+    محاولة مزامنة مثالية غير مضمونة.
+    """
+    import imageio_ffmpeg
+
+    ffmpeg_exe = imageio_ffmpeg.get_ffmpeg_exe()
+
+    with tempfile.TemporaryDirectory() as tmp_dir:
+        tmp_path = pathlib.Path(tmp_dir)
+        video_in = tmp_path / "silent_video.mp4"
+        video_in.write_bytes(video_bytes)
+        output_path = tmp_path / f"with_audio_{uuid.uuid4().hex}.mp4"
+
+        result = subprocess.run(
+            [
+                ffmpeg_exe, "-y",
+                "-i", str(video_in),
+                "-i", str(narration_path),
+                "-map", "0:v:0", "-map", "1:a:0",
+                "-c:v", "copy", "-c:a", "aac",
+                "-shortest",
+                str(output_path),
+            ],
+            capture_output=True,
+            text=True,
+        )
+        if result.returncode != 0 or not output_path.exists():
+            raise VideoGenerationError(
+                f"⚠️ فشل إضافة الصوت إلى الفيديو عبر ffmpeg: {result.stderr[-500:]}",
+                status_code=502,
+            )
+        return output_path.read_bytes()
+
+
+async def generate_stitched_video(prompt: str, max_scenes: int) -> tuple[bytes, int, bool]:
     """
     يولّد فيديو متعدد المشاهد كاملاً: يقسّم النص، يولّد كل مشهد تسلسلياً عبر
-    Wan 2.2 14B، ثم يدمج الكل بـ ffmpeg. يعيد (بايتات الفيديو النهائي، عدد
-    المشاهد الفعلي) - العدد الفعلي يُستخدَم لاحقاً لعرض الحقيقة للمستخدم
-    (مثلاً لو كتب سطراً واحداً فقط رغم أن باقته تسمح بـ3 مشاهد).
+    Wan 2.2 14B، يدمج الكل بـ ffmpeg، ثم يضيف رواية صوتية عربية حقيقية (gTTS)
+    فوق الفيديو الناتج. يعيد (بايتات الفيديو النهائي، عدد المشاهد الفعلي،
+    هل تم تضمين الصوت فعلاً) - عدد المشاهد الفعلي وحالة الصوت تُستخدَمان لاحقاً
+    لعرض الحقيقة الكاملة للمستخدم دون أي ادّعاء غير دقيق.
     """
     scenes = _split_into_scenes(prompt, max_scenes)
     clip_paths: list[pathlib.Path] = []
@@ -477,7 +542,17 @@ async def generate_stitched_video(prompt: str, max_scenes: int) -> tuple[bytes, 
         clip_paths.append(clip_path)
 
     video_bytes = await run_in_threadpool(_concat_videos_sync, clip_paths)
-    return video_bytes, len(clip_paths)
+
+    full_narration_text = ". ".join(scenes)
+    has_narration = False
+    try:
+        narration_path = await run_in_threadpool(_generate_narration_sync, full_narration_text)
+        video_bytes = await run_in_threadpool(_mux_narration_sync, video_bytes, narration_path)
+        has_narration = True
+    except Exception as exc:  # noqa: BLE001 - فشل الصوت لا يُسقط الفيديو الصامت الناجح
+        print(f"⚠️ تحذير: فشل توليد/إضافة الرواية الصوتية (تم إرجاع الفيديو صامتاً): {exc}")
+
+    return video_bytes, len(clip_paths), has_narration
 
 
 # ============================================================
@@ -636,7 +711,7 @@ async def generate_video(payload: GenerateVideoRequest):
     max_scenes = SCENE_TIER_TO_COUNT[quality]
 
     try:
-        video_bytes, actual_scene_count = await generate_stitched_video(prompt, max_scenes)
+        video_bytes, actual_scene_count, has_narration = await generate_stitched_video(prompt, max_scenes)
         video_url = await upload_generated_video(video_bytes)
     except VideoGenerationError as exc:
         # لا يتم خصم أي نقاط عند الفشل
@@ -653,6 +728,7 @@ async def generate_video(payload: GenerateVideoRequest):
         "scene_count": actual_scene_count,
         "scene_duration_seconds": WAN_SCENE_DURATION_SECONDS,
         "total_duration_seconds": round(actual_scene_count * WAN_SCENE_DURATION_SECONDS, 1),
+        "has_narration": has_narration,
         "is_unlimited": user["is_unlimited"],
     }
 
