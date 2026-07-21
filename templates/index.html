@@ -34,7 +34,7 @@
 
   <div class="text-center mb-4">
     {% if user.is_unlimited or user.plan == 'pro' %}
-      <span class="badge bg-warning text-dark badge-plan">👑 باقة PRO مفعّلة (حتى 3 مشاهد ≈15 ثانية) — {{ user.points }} نقطة</span>
+      <span class="badge bg-warning text-dark badge-plan">👑 باقة PRO مفعّلة (حتى 8 مشاهد ≈38 ثانية) — {{ user.points }} نقطة</span>
     {% elif user.plan == 'medium' %}
       <span class="badge bg-info text-dark badge-plan">⚡ الباقة المتوسطة (حتى مشهدين ≈10 ثوانٍ) — {{ user.points }} نقطة</span>
     {% else %}
@@ -54,8 +54,10 @@
 
     <p class="text-center text-secondary small mt-2 mb-0">
       ⚡ اتصال حقيقي بمحرك Wan 2.2 14B السحابي المجاني - كل سطر يصبح مشهداً منفصلاً
-      (~5 ثوانٍ) ثم تُدمَج المشاهد في فيديو واحد. قد تحدث إعادة محاولة تلقائية عند الازدحام،
-      وقد يستغرق التوليد دقيقة أو أكثر مع عدة مشاهد.
+      (~5 ثوانٍ) ثم تُدمَج المشاهد في فيديو واحد. قد تحدث إعادة محاولة تلقائية عند الازدحام.
+      مع عدد كبير من المشاهد (باقة PRO حتى 8) قد يستغرق التوليد عدة دقائق، وفي حالات
+      ازدحام نادرة قد ينتهي الوقت المسموح به قبل الاكتمال - إن حدث ذلك، أعد المحاولة
+      بعدد مشاهد أقل أو بعد قليل.
     </p>
 
     <div id="statusBox" class="mt-3 d-none"></div>
@@ -91,7 +93,7 @@
       </div>
       <div class="col-md-6">
         <div class="plan-card">
-          <h6 class="fw-bold">👑 باقة PRO السينمائية (حتى 3 مشاهد ≈15 ثانية)</h6>
+          <h6 class="fw-bold">👑 باقة PRO السينمائية (حتى 8 مشاهد ≈38 ثانية)</h6>
           <p class="text-secondary small mb-2">500 نقطة + غير محدود — 15,000 د.ع</p>
           <div class="d-grid gap-2">
             <button class="btn gateway-btn btn-zaincash" data-plan="pro" data-gateway="zaincash">Zain Cash</button>
