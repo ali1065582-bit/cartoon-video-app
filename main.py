@@ -153,6 +153,23 @@ def init_db() -> None:
                        ON CONFLICT (user_id) DO NOTHING""",
                     (DEFAULT_USER_ID,),
                 )
+                # جدول سجلات الأخطاء والأداء (نظام المراقبة) - يُنشأ هنا أيضاً
+                # حتى يعمل تلقائياً بمجرد ضبط DATABASE_URL دون أي خطوة يدوية إضافية.
+                cur.execute("""
+                    CREATE TABLE IF NOT EXISTS event_logs (
+                        id SERIAL PRIMARY KEY,
+                        created_at TIMESTAMP DEFAULT NOW(),
+                        endpoint TEXT NOT NULL,
+                        method TEXT,
+                        level TEXT NOT NULL,
+                        status_code INTEGER,
+                        duration_ms DOUBLE PRECISION,
+                        message TEXT
+                    )
+                """)
+                cur.execute(
+                    "CREATE INDEX IF NOT EXISTS idx_event_logs_created_at ON event_logs (created_at)"
+                )
     finally:
         conn.close()
 
@@ -202,6 +219,75 @@ def set_user_plan_and_unlimited(user_id: str, plan: str, is_unlimited: bool) -> 
 def get_current_user_id() -> str:
     """مؤقتاً: مستخدم واحد ثابت (guest) لحين بناء نظام تسجيل دخول فعلي."""
     return DEFAULT_USER_ID
+
+
+# ============================================================
+# نظام تسجيل الأخطاء والأداء (Logging System)
+# ============================================================
+# فكرة التصميم: تسجيل تلقائي على مستوى الـmiddleware (وليس داخل كل مسار على
+# حدة) - أي مسار جديد يُضاف مستقبلاً يُسجَّل تلقائياً بدون أي تعديل إضافي.
+# التسجيل نفسه "فاشل بأمان" (Fail Safe): أي خطأ أثناء الكتابة في قاعدة
+# البيانات (مثلاً DATABASE_URL غير مضبوط) يُطبع تحذيراً فقط في سجلات Vercel
+# الخام، ولا يُسقط أبداً الطلب الأصلي الذي كنا نراقبه.
+def _log_event(
+    endpoint: str,
+    method: str,
+    level: str,
+    duration_ms: float,
+    status_code,
+    message: str = "",
+) -> None:
+    try:
+        conn = get_db_connection()
+        try:
+            with conn:
+                with conn.cursor() as cur:
+                    cur.execute(
+                        """INSERT INTO event_logs (endpoint, method, level, status_code, duration_ms, message)
+                           VALUES (%s, %s, %s, %s, %s, %s)""",
+                        (endpoint, method, level, status_code, duration_ms, (message or "")[:2000]),
+                    )
+        finally:
+            conn.close()
+    except Exception as exc:  # noqa: BLE001 - التسجيل نفسه يجب ألا يُسقط أي طلب أبداً
+        print(f"⚠️  تحذير: فشل تسجيل الحدث في event_logs ({endpoint}): {exc}")
+
+
+# مسارات لا فائدة من تسجيل كل زيارة ناجحة لها (تصفح عادي/فحص دوري خفيف) -
+# لا تزال تُسجَّل لو رجعت خطأً (4xx/5xx)، فقط النجاح الروتيني يُتجاهل لتفادي
+# إغراق الجدول بسجلات لا قيمة تحليلية فيها.
+_LOG_SKIP_SUCCESS_PATHS = {"/", "/admin", "/api/user-status", "/favicon.ico"}
+
+
+@app.middleware("http")
+async def performance_logging_middleware(request: Request, call_next):
+    path = request.url.path
+    if path.startswith("/static"):
+        return await call_next(request)
+
+    start = time.monotonic()
+    try:
+        response = await call_next(request)
+    except Exception as exc:  # noqa: BLE001 - استثناء غير متوقع لم يُحوَّل لاستجابة HTTP بعد
+        duration_ms = round((time.monotonic() - start) * 1000, 1)
+        await run_in_threadpool(
+            _log_event, path, request.method, "error", duration_ms, 500, f"استثناء غير معالَج: {exc}"
+        )
+        raise
+
+    duration_ms = round((time.monotonic() - start) * 1000, 1)
+    status_code = response.status_code
+    if status_code >= 500:
+        level = "error"
+    elif status_code >= 400:
+        level = "warning"
+    else:
+        level = "info"
+
+    if level != "info" or path not in _LOG_SKIP_SUCCESS_PATHS:
+        await run_in_threadpool(_log_event, path, request.method, level, duration_ms, status_code, "")
+
+    return response
 
 
 # تهيئة الجداول عند الإقلاع - بشكل آمن (لا يُسقط التطبيق بالكامل لو فشل الاتصال
@@ -780,6 +866,52 @@ async def admin_grant_pro(payload: AdminGrantRequest):
         "points": user["points"],
         "is_unlimited": user["is_unlimited"],
     }
+
+
+@app.get("/api/admin/logs")
+async def admin_view_logs(key: str = "", limit: int = 50):
+    """
+    عرض سجلات الأخطاء والأداء المُجمَّعة تلقائياً عبر performance_logging_middleware.
+    مرفوض افتراضياً (Fail Closed) بنفس مبدأ /api/admin/grant-pro - لا يعمل
+    إطلاقاً ما لم يُضبط ADMIN_SECRET فعلياً، ويُمرَّر كمعامل ?key= في الرابط.
+    """
+    if not ADMIN_SECRET or key != ADMIN_SECRET:
+        raise HTTPException(status_code=403, detail="كلمة السر الإدارية غير صحيحة أو غير مُفعَّلة على السيرفر.")
+
+    limit = max(1, min(limit, 200))
+
+    conn = get_db_connection()
+    try:
+        with conn.cursor() as cur:
+            cur.execute(
+                """SELECT endpoint, method, level, status_code, duration_ms, message, created_at
+                   FROM event_logs ORDER BY id DESC LIMIT %s""",
+                (limit,),
+            )
+            recent_rows = [dict(r) for r in cur.fetchall()]
+
+            cur.execute(
+                """SELECT
+                       endpoint,
+                       COUNT(*) AS total_requests,
+                       COUNT(*) FILTER (WHERE level = 'error') AS error_count,
+                       COUNT(*) FILTER (WHERE level = 'warning') AS warning_count,
+                       ROUND(AVG(duration_ms)::numeric, 1) AS avg_duration_ms,
+                       ROUND(MAX(duration_ms)::numeric, 1) AS max_duration_ms
+                   FROM event_logs
+                   WHERE created_at > NOW() - INTERVAL '24 hours'
+                   GROUP BY endpoint
+                   ORDER BY total_requests DESC"""
+            )
+            summary_rows = [dict(r) for r in cur.fetchall()]
+    finally:
+        conn.close()
+
+    for row in recent_rows:
+        if row.get("created_at") is not None:
+            row["created_at"] = row["created_at"].isoformat()
+
+    return {"logs": recent_rows, "summary_24h": summary_rows}
 
 
 @app.post("/api/checkout")
