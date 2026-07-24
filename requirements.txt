@@ -5,4 +5,4 @@ psycopg2-binary
 boto3
 gradio_client
 imageio-ffmpeg
-gTTS
+edge-tts

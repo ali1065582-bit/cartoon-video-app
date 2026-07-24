@@ -302,6 +302,7 @@ SANDBOX_OTP_CODE = os.getenv("SANDBOX_OTP_CODE", "123456")
 class GenerateVideoRequest(BaseModel):
     prompt: str
     quality: str = "1080p"
+    voice: str = "ar-IQ-BasselNeural"  # = DEFAULT_NARRATION_VOICE (مُعرَّف لاحقاً بالملف مع بقية إعدادات الصوت)
 
 
 class AdminGrantRequest(BaseModel):
@@ -329,6 +330,7 @@ class MergeScenesRequest(BaseModel):
     scene_keys: list[str]
     scenes_text: list[str] = []
     quality: str = "480p"
+    voice: str = "ar-IQ-BasselNeural"  # = DEFAULT_NARRATION_VOICE (مُعرَّف لاحقاً بالملف مع بقية إعدادات الصوت)
 
 
 # ============================================================
@@ -561,27 +563,43 @@ def _concat_videos_sync(clip_paths: list[pathlib.Path]) -> bytes:
 
 
 # ============================================================
-# الرواية الصوتية (Narration) - تحويل نص القصة إلى صوت عربي حقيقي عبر gTTS
+# الرواية الصوتية (Narration) - تحويل نص القصة إلى صوت عربي حقيقي عبر Edge TTS
 # ============================================================
-# gTTS مكتبة مجانية حقيقية تستخدم واجهة Google Translate الصوتية غير الرسمية
-# (وليست Google Cloud Text-to-Speech المدفوعة) - سريعة (ثوانٍ) ولا تحتاج طابور
-# GPU، لكنها اعتماد على خدمة مجانية غير مضمونة الاستقرار 100%. لهذا فشل توليد
-# الصوت لا يُسقط الطلب بالكامل: يُعاد الفيديو صامتاً مع الإفصاح الصريح بذلك،
-# بدل ادّعاء نجاح كامل غير حقيقي.
+# التبديل من gTTS إلى Edge TTS (مكتبة edge-tts): تستخدم نفس أصوات "Read
+# Aloud" العصبية (Neural) المستخدمة داخل متصفح Microsoft Edge - مجانية بالكامل
+# وبلا حد استخدام يومي، وجودتها الصوتية أعلى بمراحل من gTTS (صوت طبيعي حقيقي
+# بدل نبرة آلية مسطّحة). تعتمد على واجهة غير رسمية (لا يوجد API key)، لذلك فشل
+# توليد الصوت لا يُسقط الطلب بالكامل: يُعاد الفيديو صامتاً مع الإفصاح الصريح
+# بذلك، بدل ادّعاء نجاح كامل غير حقيقي - نفس مبدأ gTTS السابق.
 #
-# قرار تصميم مهم: تُولَّد رواية صوتية واحدة لكامل نص القصة (كل الأسطر مجتمعة)
-# وتُلصَق فوق الفيديو النهائي المدموج، بدل توليد صوت منفصل لكل مشهد ومزامنته
-# بدقة - الخيار الأول أبسط وأكثر موثوقية هندسياً، لكن معناه أن توقيت الصوت لكل
-# مشهد تقريبي وليس متزامناً إطاراً بإطار مع الصورة.
-NARRATION_LANG = "ar"
+# قرار تصميم مهم (لم يتغيّر): تُولَّد رواية صوتية واحدة لكامل نص القصة (كل
+# الأسطر مجتمعة) وتُلصَق فوق الفيديو النهائي المدموج، بدل توليد صوت منفصل لكل
+# مشهد ومزامنته بدقة.
+#
+# قائمة الأصوات: تم التحقق حياً (edge-tts --list-voices) من وجود كل صوت أدناه
+# فعلياً بما فيها لهجة عراقية حقيقية (ar-IQ) - غير متوفرة في gTTS إطلاقاً.
+NARRATION_VOICES = {
+    "ar-IQ-BasselNeural": "🇮🇶 بسل - عراقي (رجالي)",
+    "ar-IQ-RanaNeural": "🇮🇶 رنا - عراقي (نسائي)",
+    "ar-SA-HamedNeural": "🇸🇦 حامد - سعودي فصيح (رجالي)",
+    "ar-SA-ZariyahNeural": "🇸🇦 زارية - سعودي فصيح (نسائي)",
+    "ar-EG-ShakirNeural": "🇪🇬 شاكر - مصري (رجالي)",
+    "ar-EG-SalmaNeural": "🇪🇬 سلمى - مصري (نسائي)",
+}
+DEFAULT_NARRATION_VOICE = "ar-IQ-BasselNeural"
 
 
-def _generate_narration_sync(full_text: str) -> pathlib.Path:
-    from gtts import gTTS
+def _resolve_narration_voice(voice: str | None) -> str:
+    return voice if voice in NARRATION_VOICES else DEFAULT_NARRATION_VOICE
+
+
+async def _generate_narration_async(full_text: str, voice: str) -> pathlib.Path:
+    import edge_tts
 
     tmp_dir = pathlib.Path(tempfile.mkdtemp())
     narration_path = tmp_dir / f"narration_{uuid.uuid4().hex}.mp3"
-    gTTS(text=full_text, lang=NARRATION_LANG).save(str(narration_path))
+    communicate = edge_tts.Communicate(full_text, voice)
+    await communicate.save(str(narration_path))
     return narration_path
 
 
@@ -624,7 +642,7 @@ def _mux_narration_sync(video_bytes: bytes, narration_path: pathlib.Path) -> byt
         return output_path.read_bytes()
 
 
-async def generate_stitched_video(prompt: str, max_scenes: int) -> tuple[bytes, int, bool]:
+async def generate_stitched_video(prompt: str, max_scenes: int, voice: str = DEFAULT_NARRATION_VOICE) -> tuple[bytes, int, bool]:
     """
     يولّد فيديو متعدد المشاهد كاملاً: يقسّم النص، يولّد كل مشهد تسلسلياً عبر
     LTX-Video، يدمج الكل بـ ffmpeg، ثم يضيف رواية صوتية عربية حقيقية (gTTS)
@@ -649,7 +667,7 @@ async def generate_stitched_video(prompt: str, max_scenes: int) -> tuple[bytes, 
     full_narration_text = ". ".join(scenes)
     has_narration = False
     try:
-        narration_path = await run_in_threadpool(_generate_narration_sync, full_narration_text)
+        narration_path = await _generate_narration_async(full_narration_text, _resolve_narration_voice(voice))
         video_bytes = await run_in_threadpool(_mux_narration_sync, video_bytes, narration_path)
         has_narration = True
     except Exception as exc:  # noqa: BLE001 - فشل الصوت لا يُسقط الفيديو الصامت الناجح
@@ -814,7 +832,7 @@ async def generate_video(payload: GenerateVideoRequest):
     max_scenes = SCENE_TIER_TO_COUNT[quality]
 
     try:
-        video_bytes, actual_scene_count, has_narration = await generate_stitched_video(prompt, max_scenes)
+        video_bytes, actual_scene_count, has_narration = await generate_stitched_video(prompt, max_scenes, payload.voice)
         video_url = await upload_generated_video(video_bytes)
     except VideoGenerationError as exc:
         # لا يتم خصم أي نقاط عند الفشل
@@ -922,7 +940,7 @@ async def merge_scenes(payload: MergeScenesRequest):
         full_narration_text = ". ".join(t for t in payload.scenes_text if t.strip())
         if full_narration_text.strip():
             try:
-                narration_path = await run_in_threadpool(_generate_narration_sync, full_narration_text)
+                narration_path = await _generate_narration_async(full_narration_text, _resolve_narration_voice(payload.voice))
                 video_bytes = await run_in_threadpool(_mux_narration_sync, video_bytes, narration_path)
                 has_narration = True
             except Exception as exc:  # noqa: BLE001 - فشل الصوت لا يُسقط الفيديو الصامت الناجح
@@ -954,6 +972,41 @@ async def merge_scenes(payload: MergeScenesRequest):
         "has_narration": has_narration,
         "is_unlimited": user["is_unlimited"],
     }
+
+
+# ============================================================
+# قائمة الأصوات المتاحة + تجربة صوت قصيرة قبل الاختيار (Edge TTS مجاني)
+# ============================================================
+PREVIEW_SAMPLE_TEXT = "مرحباً، هذا مثال على هذا الصوت في محرك توليد الفيديو."
+
+
+class PreviewVoiceRequest(BaseModel):
+    voice: str = "ar-IQ-BasselNeural"  # = DEFAULT_NARRATION_VOICE
+
+
+@app.get("/api/voices")
+async def list_voices():
+    """قائمة الأصوات العربية المتاحة للرواية الصوتية (للعرض بقائمة الاختيار بالواجهة)."""
+    return {
+        "voices": [{"id": vid, "label": label} for vid, label in NARRATION_VOICES.items()],
+        "default": DEFAULT_NARRATION_VOICE,
+    }
+
+
+@app.post("/api/preview-voice")
+async def preview_voice(payload: PreviewVoiceRequest):
+    """
+    يولّد مقطعاً صوتياً قصيراً بنفس الصوت المختار حتى يسمعه المستخدم قبل أن
+    يقرر - لا يُرفع إلى R2 (مؤقت وصغير جداً)، يُعاد مباشرة كبايتات صوتية.
+    """
+    voice = _resolve_narration_voice(payload.voice)
+    try:
+        narration_path = await _generate_narration_async(PREVIEW_SAMPLE_TEXT, voice)
+        audio_bytes = narration_path.read_bytes()
+    except Exception as exc:  # noqa: BLE001
+        raise HTTPException(status_code=502, detail=f"⚠️ فشل توليد عينة الصوت: {exc}")
+
+    return Response(content=audio_bytes, media_type="audio/mpeg")
 
 
 if __name__ == "__main__":
