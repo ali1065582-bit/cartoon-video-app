@@ -321,6 +321,22 @@ class CheckoutRequest(BaseModel):
     otp: str
 
 
+# نماذج الطلبات الخاصة بتوليد المشاهد المُقسَّم (طلب منفصل لكل مشهد)
+class PlanScenesRequest(BaseModel):
+    prompt: str
+    quality: str = "480p"
+
+
+class GenerateSceneRequest(BaseModel):
+    scene_prompt: str
+
+
+class MergeScenesRequest(BaseModel):
+    scene_keys: list[str]
+    scenes_text: list[str] = []
+    quality: str = "480p"
+
+
 # ============================================================
 # رفع الفيديو المولَّد إلى Cloudflare R2 (بدل القرص المحلي غير الموثوق في الإنتاج)
 # ============================================================
@@ -376,6 +392,44 @@ def _upload_video_to_r2_sync(video_bytes: bytes) -> str:
 async def upload_generated_video(video_bytes: bytes) -> str:
     """رفع غير متزامن (عبر threadpool لأن boto3 مكتبة متزامنة) - يعيد رابطاً عاماً دائماً."""
     return await run_in_threadpool(_upload_video_to_r2_sync, video_bytes)
+
+
+# ============================================================
+# دعم تقسيم التوليد لطلبات منفصلة لكل مشهد (تجاوز مهلة تنفيذ Vercel)
+# ============================================================
+# بدل توليد كل المشاهد ودمجها ضمن طلب HTTP واحد طويل (قد يقترب من/يتجاوز
+# مهلة Vercel القصوى)، كل مشهد الآن يُولَّد بطلب مستقل قصير (٣٠-٥٠ ثانية)،
+# يُرفع مؤقتاً إلى R2 تحت مجلد scenes-tmp/، ثم طلب أخير منفصل وقصير يجمع كل
+# المشاهد المرفوعة، يدمجها، يضيف الصوت، ويحذف الملفات المؤقتة. هذا يجعل مدة
+# كل طلب منفرد صغيرة وثابتة بغض النظر عن عدد المشاهد الكلي.
+def _upload_bytes_to_r2_sync(data: bytes, key: str) -> None:
+    client = _get_r2_client()
+    try:
+        client.put_object(Bucket=R2_BUCKET_NAME, Key=key, Body=data, ContentType="video/mp4")
+    except Exception as exc:  # noqa: BLE001
+        raise VideoGenerationError(
+            f"⚠️ فشل رفع مشهد مؤقت إلى Cloudflare R2: {exc}.",
+            status_code=502,
+        )
+
+
+def _download_bytes_from_r2_sync(key: str) -> bytes:
+    client = _get_r2_client()
+    try:
+        return client.get_object(Bucket=R2_BUCKET_NAME, Key=key)["Body"].read()
+    except Exception as exc:  # noqa: BLE001
+        raise VideoGenerationError(
+            f"⚠️ فشل تحميل مشهد مؤقت من Cloudflare R2 (قد يكون منتهي الصلاحية): {exc}.",
+            status_code=502,
+        )
+
+
+def _delete_object_from_r2_sync(key: str) -> None:
+    client = _get_r2_client()
+    try:
+        client.delete_object(Bucket=R2_BUCKET_NAME, Key=key)
+    except Exception:  # noqa: BLE001 - تنظيف غير حرج، لا نُسقط الطلب بسببه
+        pass
 
 
 # ============================================================
@@ -779,6 +833,126 @@ async def generate_video(payload: GenerateVideoRequest):
         "scene_count": actual_scene_count,
         "scene_duration_seconds": WAN_SCENE_DURATION_SECONDS,
         "total_duration_seconds": round(actual_scene_count * WAN_SCENE_DURATION_SECONDS, 1),
+        "has_narration": has_narration,
+        "is_unlimited": user["is_unlimited"],
+    }
+
+
+# ============================================================
+# مسارات التوليد المُقسَّم (طلب منفصل لكل مشهد) - الحل الدائم لمشكلة مهلة Vercel
+# ============================================================
+# التدفق الجديد من الواجهة (بدل طلب /generate-video الطويل الوحيد):
+#   1) POST /api/plan-scenes   -> تحقق من الباقة/النقاط وتقسيم النص لمشاهد (سريع جداً، بلا توليد فعلي)
+#   2) POST /api/generate-scene (مرة لكل مشهد بالتسلسل) -> يولّد مشهداً واحداً فقط ويرفعه مؤقتاً لـR2
+#   3) POST /api/merge-scenes  -> يجمع كل المشاهد المرفوعة، يدمجها، يضيف الصوت، يخصم النقاط، وينظّف الملفات المؤقتة
+# كل طلب من الثلاثة قصير ومستقل (لا يتجاوز عملياً بضع عشرات الثواني) مهما
+# كان عدد المشاهد الكلي، لأن العدد لم يعد محكوماً بمهلة تنفيذ دالة واحدة.
+@app.post("/api/plan-scenes")
+async def plan_scenes(payload: PlanScenesRequest):
+    user_id = get_current_user_id()
+    user = get_user_row(user_id)
+
+    prompt = (payload.prompt or "").strip()
+    if not prompt:
+        raise HTTPException(status_code=400, detail="الرجاء كتابة سيناريو أو وصف الفيديو أولاً.")
+
+    quality = payload.quality if payload.quality in SCENE_TIER_TO_COUNT else "480p"
+
+    if not user["is_unlimited"]:
+        allowed_qualities = PLAN_ALLOWED_QUALITY.get(user["plan"], ["480p"])
+        if quality not in allowed_qualities:
+            raise HTTPException(
+                status_code=403,
+                detail=f"باقة {quality} تتطلب ترقية باقتك الحالية ({user['plan']}).",
+            )
+        cost = QUALITY_POINTS_COST[quality]
+        if user["points"] < cost:
+            raise HTTPException(
+                status_code=402,
+                detail=f"رصيدك غير كافٍ. هذا التوليد يحتاج {cost} نقطة وتملك حالياً {user['points']} فقط.",
+            )
+
+    max_scenes = SCENE_TIER_TO_COUNT[quality]
+    scenes = _split_into_scenes(prompt, max_scenes)
+    return {"scenes": scenes, "quality": quality}
+
+
+@app.post("/api/generate-scene")
+async def generate_scene(payload: GenerateSceneRequest):
+    scene_prompt = (payload.scene_prompt or "").strip()
+    if not scene_prompt:
+        raise HTTPException(status_code=400, detail="نص المشهد فارغ.")
+
+    try:
+        clip_path = await _generate_one_scene_with_retry(scene_prompt)
+        clip_bytes = clip_path.read_bytes()
+    except VideoGenerationError as exc:
+        raise HTTPException(status_code=exc.status_code, detail=exc.message)
+
+    scene_key = f"scenes-tmp/{uuid.uuid4().hex}.mp4"
+    await run_in_threadpool(_upload_bytes_to_r2_sync, clip_bytes, scene_key)
+    return {"scene_key": scene_key}
+
+
+@app.post("/api/merge-scenes")
+async def merge_scenes(payload: MergeScenesRequest):
+    if not payload.scene_keys:
+        raise HTTPException(status_code=400, detail="لا توجد مشاهد لدمجها.")
+
+    user_id = get_current_user_id()
+    user = get_user_row(user_id)
+    quality = payload.quality if payload.quality in SCENE_TIER_TO_COUNT else "480p"
+
+    cost = 0
+    if not user["is_unlimited"]:
+        cost = QUALITY_POINTS_COST.get(quality, 0)
+        if user["points"] < cost:
+            raise HTTPException(status_code=402, detail="رصيدك غير كافٍ لإكمال هذا الفيديو.")
+
+    try:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            clip_paths: list[pathlib.Path] = []
+            for i, key in enumerate(payload.scene_keys):
+                clip_bytes = await run_in_threadpool(_download_bytes_from_r2_sync, key)
+                clip_path = pathlib.Path(tmp_dir) / f"scene_{i}.mp4"
+                clip_path.write_bytes(clip_bytes)
+                clip_paths.append(clip_path)
+
+            video_bytes = await run_in_threadpool(_concat_videos_sync, clip_paths)
+
+        has_narration = False
+        full_narration_text = ". ".join(t for t in payload.scenes_text if t.strip())
+        if full_narration_text.strip():
+            try:
+                narration_path = await run_in_threadpool(_generate_narration_sync, full_narration_text)
+                video_bytes = await run_in_threadpool(_mux_narration_sync, video_bytes, narration_path)
+                has_narration = True
+            except Exception as exc:  # noqa: BLE001 - فشل الصوت لا يُسقط الفيديو الصامت الناجح
+                print(f"⚠️ تحذير: فشل توليد/إضافة الرواية الصوتية (تم إرجاع الفيديو صامتاً): {exc}")
+
+        video_url = await upload_generated_video(video_bytes)
+    except VideoGenerationError as exc:
+        raise HTTPException(status_code=exc.status_code, detail=exc.message)
+    finally:
+        # تنظيف المشاهد المؤقتة من R2 (تنجح عملية الدمج أو تفشل، لا داعي لتركها للأبد)
+        for key in payload.scene_keys:
+            try:
+                await run_in_threadpool(_delete_object_from_r2_sync, key)
+            except Exception:  # noqa: BLE001
+                pass
+
+    remaining_points = user["points"]
+    if not user["is_unlimited"] and cost:
+        remaining_points = update_user_points(user_id, -cost)
+
+    scene_count = len(payload.scene_keys)
+    return {
+        "video_url": video_url,
+        "remaining_points": remaining_points,
+        "quality": quality,
+        "scene_count": scene_count,
+        "scene_duration_seconds": WAN_SCENE_DURATION_SECONDS,
+        "total_duration_seconds": round(scene_count * WAN_SCENE_DURATION_SECONDS, 1),
         "has_narration": has_narration,
         "is_unlimited": user["is_unlimited"],
     }
