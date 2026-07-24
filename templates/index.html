@@ -84,6 +84,23 @@
   </div>
 
   <div class="card-glass p-4 mb-4">
+    <h5 class="fw-bold mb-1">🔗 دمج فيديوهات سابقة بفيديو واحد أطول</h5>
+    <p class="text-secondary small mb-3">
+      الصق روابط 2-10 فيديوهات مولَّدة سابقاً من هذا التطبيق (كل رابط بسطر
+      منفصل) ليُدمَجوا بفيديو واحد متسلسل. هذه الميزة لا تستخدم محرك LTX-Video
+      إطلاقاً - دمج ملفات فقط عبر ffmpeg، فلا تستهلك أي شيء من حصة GPU اليومية.
+    </p>
+    <textarea id="mergeUrlsInput" class="form-control mb-2" rows="3"
+      placeholder="https://...r2.dev/generated/aaa.mp4&#10;https://...r2.dev/generated/bbb.mp4"></textarea>
+    <button id="mergeVideosBtn" class="btn btn-outline-light w-100">🔗 دمج الفيديوهات</button>
+    <div id="mergeStatusBox" class="mt-3 d-none"></div>
+    <div id="mergeVideoBox" class="mt-3 d-none">
+      <video id="mergedResultVideo" class="w-100 rounded" controls></video>
+      <a id="mergedDownloadLink" class="btn btn-outline-success mt-2 w-100" download>⬇️ تحميل الفيديو المدموج</a>
+    </div>
+  </div>
+
+  <div class="card-glass p-4 mb-4">
     <h5 class="fw-bold mb-1">💳 شحن النقاط وترقية الباقة</h5>
     <p class="text-secondary small mb-3">
       ⚠️ وضع تجريبي (Sandbox) - رمز التحقق التجريبي: <code>123456</code>. تحديث الباقة يحدث فعلياً في قاعدة البيانات.
@@ -210,6 +227,58 @@
     } finally {
       previewVoiceBtn.disabled = false;
       previewVoiceBtn.textContent = originalText;
+    }
+  });
+
+  // ============================================================
+  // دمج فيديوهات سابقة (بلا استهلاك حصة GPU - دمج ملفات فقط)
+  // ============================================================
+  const mergeUrlsInput = document.getElementById('mergeUrlsInput');
+  const mergeVideosBtn = document.getElementById('mergeVideosBtn');
+  const mergeStatusBox = document.getElementById('mergeStatusBox');
+  const mergeVideoBox = document.getElementById('mergeVideoBox');
+  const mergedResultVideo = document.getElementById('mergedResultVideo');
+  const mergedDownloadLink = document.getElementById('mergedDownloadLink');
+
+  function setMergeStatus(message, type) {
+    mergeStatusBox.textContent = message;
+    mergeStatusBox.className = 'mt-3 alert alert-' + (type || 'secondary');
+    mergeStatusBox.classList.remove('d-none');
+  }
+
+  mergeVideosBtn.addEventListener('click', async () => {
+    const urls = mergeUrlsInput.value.split('\n').map((u) => u.trim()).filter(Boolean);
+    if (urls.length < 2) {
+      setMergeStatus('⚠️ أدخل رابطين على الأقل (كل رابط بسطر منفصل)', 'warning');
+      return;
+    }
+
+    mergeStatusBox.classList.add('d-none');
+    mergeVideoBox.classList.add('d-none');
+    mergeVideosBtn.disabled = true;
+    const originalText = mergeVideosBtn.textContent;
+    mergeVideosBtn.textContent = '⏳ جاري الدمج...';
+
+    try {
+      const res = await fetch('/api/merge-videos', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ video_urls: urls }),
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        setMergeStatus('❌ ' + (data.detail || 'حدث خطأ غير متوقع أثناء الدمج.'), 'danger');
+        return;
+      }
+      mergedResultVideo.src = data.video_url;
+      mergedDownloadLink.href = data.video_url;
+      mergeVideoBox.classList.remove('d-none');
+      setMergeStatus(`✅ تم دمج ${data.merged_count} فيديوهات بنجاح في فيديو واحد.`, 'success');
+    } catch (err) {
+      setMergeStatus('❌ تعذر الاتصال بالسيرفر: ' + err.message, 'danger');
+    } finally {
+      mergeVideosBtn.disabled = false;
+      mergeVideosBtn.textContent = originalText;
     }
   });
 
