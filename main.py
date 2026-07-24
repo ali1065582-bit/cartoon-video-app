@@ -282,6 +282,18 @@ ADMIN_SECRET = os.getenv("ADMIN_SECRET", "")
 
 
 # ============================================================
+# إعدادات النشر على يوتيوب (YouTube Data API v3 - OAuth 2.0)
+# ============================================================
+# ثلاثتها فارغة افتراضياً (فشل آمن واضح - Fail Closed): بدونها /api/youtube/publish
+# يرفض أي طلب برسالة تشرح بالضبط شنو الناقص، بدل خطأ غامض من مكتبة Google.
+# YOUTUBE_REFRESH_TOKEN يُستخرَج مرة واحدة يدوياً عبر Google OAuth Playground
+# (تفويض حقيقي بموافقة صاحب الحساب نفسه - لا يمكن لأي كود توليده تلقائياً).
+YOUTUBE_CLIENT_ID = os.getenv("YOUTUBE_CLIENT_ID", "")
+YOUTUBE_CLIENT_SECRET = os.getenv("YOUTUBE_CLIENT_SECRET", "")
+YOUTUBE_REFRESH_TOKEN = os.getenv("YOUTUBE_REFRESH_TOKEN", "")
+
+
+# ============================================================
 # بوابات الدفع العراقية - وضع Sandbox صراحةً (بدون معالج دفع حقيقي مرخّص بعد)
 # كل استجابة من /api/checkout تُسمّى "sandbox" بوضوح حتى لا يُخدع أي مستخدم
 # بأن هذا دفع حقيقي بمال حقيقي.
@@ -335,6 +347,13 @@ class MergeScenesRequest(BaseModel):
 
 class MergeVideosRequest(BaseModel):
     video_urls: list[str]
+
+
+class YoutubePublishRequest(BaseModel):
+    video_url: str
+    title: str
+    description: str = ""
+    privacy_status: str = "private"  # افتراضي آمن: خاص - المستخدم يقرر التغيير لعام بوعي
 
 
 # ============================================================
@@ -1024,6 +1043,83 @@ async def merge_videos(payload: MergeVideosRequest):
         raise HTTPException(status_code=exc.status_code, detail=exc.message)
 
     return {"video_url": merged_url, "merged_count": len(keys)}
+
+
+# ============================================================
+# النشر على يوتيوب (YouTube Data API v3) - نص-آلي بمراجعة بشرية إلزامية
+# ============================================================
+# فلسفة التصميم: الأتمتة الكاملة (توليد -> نشر تلقائي بلا مراجعة) تخالف سياسة
+# يوتيوب لـ"المحتوى غير الأصيل" (Inauthentic Content) وتُعرِّض القناة للحظر.
+# لذلك هذا المسار لا يُستدعى تلقائياً أبداً بعد التوليد - المستخدم لازم يفتح
+# الفيديو، يكتب عنوان ووصف حقيقيين بنفسه، ويضغط زر النشر بوعي (نفس مبدأ زر
+# الدفع/الترقية بهذا التطبيق: لا فعل حساس يحدث بدون ضغطة مستخدم صريحة).
+# الخصوصية الافتراضية "private" عمداً - يوتيوب لا يسمح لك تنشر "عام" بالخطأ.
+def _youtube_upload_sync(video_bytes: bytes, title: str, description: str, privacy_status: str) -> dict:
+    from google.oauth2.credentials import Credentials
+    from googleapiclient.discovery import build
+    from googleapiclient.http import MediaInMemoryUpload
+
+    creds = Credentials(
+        token=None,
+        refresh_token=YOUTUBE_REFRESH_TOKEN,
+        client_id=YOUTUBE_CLIENT_ID,
+        client_secret=YOUTUBE_CLIENT_SECRET,
+        token_uri="https://oauth2.googleapis.com/token",
+        scopes=["https://www.googleapis.com/auth/youtube.upload"],
+    )
+
+    youtube = build("youtube", "v3", credentials=creds)
+    media = MediaInMemoryUpload(video_bytes, mimetype="video/mp4", resumable=True)
+    request = youtube.videos().insert(
+        part="snippet,status",
+        body={
+            "snippet": {
+                "title": title,
+                "description": description,
+                "categoryId": "1",  # Film & Animation - أقرب تصنيف لمحتوى كرتوني مولَّد
+            },
+            "status": {"privacyStatus": privacy_status, "selfDeclaredMadeForKids": False},
+        },
+        media_body=media,
+    )
+    response = None
+    while response is None:
+        _status, response = request.next_chunk()
+    return response
+
+
+@app.post("/api/youtube/publish")
+async def youtube_publish(payload: YoutubePublishRequest):
+    if not (YOUTUBE_CLIENT_ID and YOUTUBE_CLIENT_SECRET and YOUTUBE_REFRESH_TOKEN):
+        raise HTTPException(
+            status_code=500,
+            detail="⚠️ حساب يوتيوب غير مربوط بعد. أضف YOUTUBE_CLIENT_ID وYOUTUBE_CLIENT_SECRET "
+            "وYOUTUBE_REFRESH_TOKEN بمتغيرات بيئة Vercel أولاً.",
+        )
+
+    title = (payload.title or "").strip()
+    if not title:
+        raise HTTPException(status_code=400, detail="الرجاء إدخال عنوان الفيديو.")
+    if payload.privacy_status not in ("private", "unlisted", "public"):
+        raise HTTPException(status_code=400, detail="حالة خصوصية غير صحيحة.")
+
+    try:
+        key = _extract_r2_key_from_public_url(payload.video_url.strip())
+        video_bytes = await run_in_threadpool(_download_bytes_from_r2_sync, key)
+        result = await run_in_threadpool(
+            _youtube_upload_sync, video_bytes, title, payload.description, payload.privacy_status
+        )
+    except VideoGenerationError as exc:
+        raise HTTPException(status_code=exc.status_code, detail=exc.message)
+    except Exception as exc:  # noqa: BLE001 - أي خطأ فعلي من مكتبة Google (توكن منتهي، حصة، إلخ) يُعرَض بصدق
+        raise HTTPException(status_code=502, detail=f"⚠️ فشل النشر على يوتيوب: {exc}")
+
+    video_id = result.get("id")
+    return {
+        "youtube_video_id": video_id,
+        "youtube_url": f"https://www.youtube.com/watch?v={video_id}" if video_id else None,
+        "privacy_status": payload.privacy_status,
+    }
 
 
 # ============================================================

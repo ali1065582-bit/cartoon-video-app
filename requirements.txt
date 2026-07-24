@@ -6,3 +6,6 @@ boto3
 gradio_client
 imageio-ffmpeg
 edge-tts
+google-auth
+google-auth-httplib2
+google-api-python-client
