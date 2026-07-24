@@ -48,6 +48,13 @@
     <textarea id="promptInput" class="form-control mb-3" rows="6"
       placeholder="اكتب كل مشهد في سطر منفصل (كل سطر = مقطع ~5 ثوانٍ يُدمَج مع البقية)، مثال:&#10;دب صغير يلعب بكرة حمراء في غابة كرتونية خضراء&#10;الدب يجري خلف فراشة ملوّنة بين الأشجار&#10;الدب ينام بسعادة تحت شجرة كبيرة"></textarea>
 
+    <label class="form-label fw-bold mt-2">🔊 صوت الرواية</label>
+    <div class="d-flex gap-2 mb-3">
+      <select id="voiceSelect" class="form-select"></select>
+      <button type="button" id="previewVoiceBtn" class="btn btn-outline-light text-nowrap">🔊 تجربة الصوت</button>
+    </div>
+    <audio id="voicePreviewAudio" class="d-none"></audio>
+
     <button id="generateBtn" class="btn btn-generate btn-lg w-100 text-white">
       🚀 توليد وفصل الفيديو المتسلسل (متعدد المشاهد)
     </button>
@@ -55,11 +62,11 @@
     <p class="text-center text-secondary small mt-2 mb-0">
       ⚡ اتصال حقيقي بمحرك LTX-Video السحابي المجاني - كل سطر يصبح مشهداً منفصلاً
       (~5 ثوانٍ) ثم تُدمَج المشاهد في فيديو واحد، مع رواية صوتية عربية تلقائية
-      (gTTS مجاني) تُقرأ فوق الفيديو الكامل. قد تحدث إعادة محاولة تلقائية عند
-      الازدحام. مع عدد كبير من المشاهد (باقة PRO حتى 8) قد يستغرق التوليد عدة
-      دقائق، وفي حالات ازدحام نادرة قد ينتهي الوقت المسموح به قبل الاكتمال أو
-      يفشل توليد الصوت وحده (يُعرَض الفيديو صامتاً حينها) - كل هذا يُعرَض بصدق
-      في رسالة النتيجة.
+      (Edge TTS مجاني - اختر صوتك أعلاه) تُقرأ فوق الفيديو الكامل. قد تحدث إعادة
+      محاولة تلقائية عند الازدحام. مع عدد كبير من المشاهد (باقة PRO حتى 8) قد
+      يستغرق التوليد عدة دقائق، وفي حالات ازدحام نادرة قد ينتهي الوقت المسموح
+      به قبل الاكتمال أو يفشل توليد الصوت وحده (يُعرَض الفيديو صامتاً حينها) -
+      كل هذا يُعرَض بصدق في رسالة النتيجة.
     </p>
 
     <div id="statusBox" class="mt-3 d-none"></div>
@@ -152,6 +159,60 @@
     statusBox.className = 'mt-3 alert alert-' + (type || 'secondary');
   }
 
+  // ============================================================
+  // اختيار صوت الرواية (Edge TTS) + تجربة الصوت قبل التوليد
+  // ============================================================
+  const voiceSelect = document.getElementById('voiceSelect');
+  const previewVoiceBtn = document.getElementById('previewVoiceBtn');
+  const voicePreviewAudio = document.getElementById('voicePreviewAudio');
+
+  async function loadVoices() {
+    try {
+      const res = await fetch('/api/voices');
+      const data = await res.json();
+      voiceSelect.innerHTML = '';
+      data.voices.forEach((v) => {
+        const opt = document.createElement('option');
+        opt.value = v.id;
+        opt.textContent = v.label;
+        if (v.id === data.default) opt.selected = true;
+        voiceSelect.appendChild(opt);
+      });
+    } catch (err) {
+      // فشل تحميل القائمة لا يمنع التوليد - يبقى المتصفح بالخيار الافتراضي بالسيرفر
+      voiceSelect.innerHTML = '<option value="ar-IQ-BasselNeural">🇮🇶 بسل - عراقي (رجالي)</option>';
+    }
+  }
+  loadVoices();
+
+  previewVoiceBtn.addEventListener('click', async () => {
+    previewVoiceBtn.disabled = true;
+    const originalText = previewVoiceBtn.textContent;
+    previewVoiceBtn.textContent = '⏳ جاري التجهيز...';
+    try {
+      const res = await fetch('/api/preview-voice', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ voice: voiceSelect.value }),
+      });
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({}));
+        setStatus('❌ ' + (data.detail || 'تعذّر توليد عينة الصوت.'), 'danger');
+        statusBox.classList.remove('d-none');
+        return;
+      }
+      const blob = await res.blob();
+      voicePreviewAudio.src = URL.createObjectURL(blob);
+      voicePreviewAudio.play();
+    } catch (err) {
+      setStatus('❌ تعذر الاتصال بالسيرفر لتجربة الصوت: ' + err.message, 'danger');
+      statusBox.classList.remove('d-none');
+    } finally {
+      previewVoiceBtn.disabled = false;
+      previewVoiceBtn.textContent = originalText;
+    }
+  });
+
   generateBtn.addEventListener('click', async () => {
     const prompt = document.getElementById('promptInput').value.trim();
     if (!prompt) {
@@ -210,7 +271,7 @@
       const res = await fetch('/api/merge-scenes', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ scene_keys: sceneKeys, scenes_text: scenes, quality: planData.quality }),
+        body: JSON.stringify({ scene_keys: sceneKeys, scenes_text: scenes, quality: planData.quality, voice: voiceSelect.value }),
       });
       const data = await res.json();
 
