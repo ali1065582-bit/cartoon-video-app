@@ -333,6 +333,10 @@ class MergeScenesRequest(BaseModel):
     voice: str = "ar-IQ-BasselNeural"  # = DEFAULT_NARRATION_VOICE (مُعرَّف لاحقاً بالملف مع بقية إعدادات الصوت)
 
 
+class MergeVideosRequest(BaseModel):
+    video_urls: list[str]
+
+
 # ============================================================
 # رفع الفيديو المولَّد إلى Cloudflare R2 (بدل القرص المحلي غير الموثوق في الإنتاج)
 # ============================================================
@@ -972,6 +976,54 @@ async def merge_scenes(payload: MergeScenesRequest):
         "has_narration": has_narration,
         "is_unlimited": user["is_unlimited"],
     }
+
+
+# ============================================================
+# دمج فيديوهات سابقة مكتملة إلى فيديو واحد أطول (بلا استهلاك حصة GPU إطلاقاً)
+# ============================================================
+# فكرة الميزة: التطبيق الحالي يحدّد الفيديو الواحد بأقصى 8 مشاهد (~38 ثانية)
+# كحد مبرمَج بالكود (SCENE_TIER_TO_COUNT)، بغض النظر عن حصة GPU المتبقية.
+# هذه الميزة تلتف حول ذاك الحد دون تعديله: تولّد عدة فيديوهات كاملة منفصلة
+# (كل واحد بطلب توليد طبيعي مستقل عبر الزر الرئيسي)، ثم تدمجها هنا بـffmpeg
+# فقط - بدون أي استدعاء لمحرك LTX-Video، أي بلا أي تكلفة إضافية من حصة GPU
+# اليومية. الأمان: نقبل فقط روابط فيديو تنتمي فعلاً لحاوية R2 الخاصة بهذا
+# التطبيق (تبدأ بـR2_PUBLIC_URL_BASE) لمنع استخدام هذا المسار كوسيط لجلب أي
+# رابط خارجي عشوائي (SSRF) - يُرفض أي رابط آخر برسالة خطأ واضحة.
+def _extract_r2_key_from_public_url(url: str) -> str:
+    base = R2_PUBLIC_URL_BASE.rstrip("/") + "/"
+    if not R2_PUBLIC_URL_BASE or not url.startswith(base):
+        raise VideoGenerationError(
+            f"⚠️ الرابط '{url}' ليس فيديو مولَّداً من هذا التطبيق (لازم يبدأ بـ {R2_PUBLIC_URL_BASE}). "
+            "يُقبَل فقط دمج فيديوهات وُلِّدت سابقاً من نفس التطبيق.",
+            status_code=400,
+        )
+    return url[len(base):]
+
+
+@app.post("/api/merge-videos")
+async def merge_videos(payload: MergeVideosRequest):
+    if len(payload.video_urls) < 2:
+        raise HTTPException(status_code=400, detail="أدخل رابطين على الأقل لدمجهما.")
+    if len(payload.video_urls) > 10:
+        raise HTTPException(status_code=400, detail="أقصى حد 10 فيديوهات بالدمج الواحد.")
+
+    try:
+        keys = [_extract_r2_key_from_public_url(u.strip()) for u in payload.video_urls if u.strip()]
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            clip_paths: list[pathlib.Path] = []
+            for i, key in enumerate(keys):
+                clip_bytes = await run_in_threadpool(_download_bytes_from_r2_sync, key)
+                clip_path = pathlib.Path(tmp_dir) / f"merge_{i}.mp4"
+                clip_path.write_bytes(clip_bytes)
+                clip_paths.append(clip_path)
+
+            merged_bytes = await run_in_threadpool(_concat_videos_sync, clip_paths)
+
+        merged_url = await upload_generated_video(merged_bytes)
+    except VideoGenerationError as exc:
+        raise HTTPException(status_code=exc.status_code, detail=exc.message)
+
+    return {"video_url": merged_url, "merged_count": len(keys)}
 
 
 # ============================================================
