@@ -162,23 +162,63 @@
     statusBox.classList.add('d-none');
     videoBox.classList.add('d-none');
     spinnerBox.classList.remove('d-none');
-    spinnerText.textContent = '⏳ جاري توليد المشاهد ودمجها (قد يستغرق دقيقة أو أكثر حسب عدد المشاهد)...';
+    spinnerText.textContent = '⏳ جاري تجهيز المشاهد...';
     generateBtn.disabled = true;
 
     try {
-      // اتصال حقيقي 100% بـ /generate-video - لا يوجد أي محاكاة أو نتيجة وهمية هنا
-      const res = await fetch('/generate-video', {
+      // ============================================================
+      // التوليد المُقسَّم: طلب منفصل وقصير لكل مشهد بدل طلب واحد طويل قد
+      // يتجاوز مهلة تنفيذ Vercel - كل خطوة أدناه مستقلة وسريعة (ثوانٍ إلى
+      // أقل من دقيقة)، بغض النظر عن عدد المشاهد الكلي بالباقة.
+      // ============================================================
+
+      // 1) تخطيط المشاهد: تحقق من الباقة/النقاط وتقسيم النص - سريع جداً، بلا توليد فعلي
+      const planRes = await fetch('/api/plan-scenes', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ prompt, quality: userQualityTier }),
+      });
+      const planData = await planRes.json();
+      if (!planRes.ok) {
+        spinnerBox.classList.add('d-none');
+        setStatus('❌ ' + (planData.detail || 'حدث خطأ غير متوقع أثناء تجهيز المشاهد.'), 'danger');
+        return;
+      }
+
+      const scenes = planData.scenes;
+      const sceneKeys = [];
+
+      // 2) توليد كل مشهد على حدة (تسلسلياً) مع تحديث حي لشريط التقدم
+      for (let i = 0; i < scenes.length; i++) {
+        spinnerText.textContent = `⏳ جاري توليد المشهد ${i + 1} من ${scenes.length}...`;
+        const sceneRes = await fetch('/api/generate-scene', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ scene_prompt: scenes[i] }),
+        });
+        const sceneData = await sceneRes.json();
+        if (!sceneRes.ok) {
+          spinnerBox.classList.add('d-none');
+          setStatus(`❌ فشل المشهد ${i + 1} من ${scenes.length}: ` + (sceneData.detail || 'حدث خطأ غير متوقع.'), 'danger');
+          return;
+        }
+        sceneKeys.push(sceneData.scene_key);
+      }
+
+      // 3) دمج كل المشاهد المرفوعة + إضافة الصوت + خصم النقاط - طلب أخير قصير
+      spinnerText.textContent = '⏳ جاري دمج المشاهد وإضافة الرواية الصوتية...';
+      const res = await fetch('/api/merge-scenes', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ scene_keys: sceneKeys, scenes_text: scenes, quality: planData.quality }),
       });
       const data = await res.json();
 
       spinnerBox.classList.add('d-none');
 
       if (!res.ok) {
-        // فشل حقيقي (نقاط غير كافية، الباقة تحتاج ترقية، ازدحام، فشل دمج، إلخ) - نعرضه بصدق
-        setStatus('❌ ' + (data.detail || 'حدث خطأ غير متوقع أثناء توليد الفيديو.'), 'danger');
+        // فشل حقيقي (نقاط غير كافية، فشل دمج، إلخ) - نعرضه بصدق
+        setStatus('❌ ' + (data.detail || 'حدث خطأ غير متوقع أثناء دمج الفيديو.'), 'danger');
         return;
       }
 
