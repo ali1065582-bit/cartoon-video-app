@@ -224,41 +224,35 @@ R2_PUBLIC_URL_BASE = os.getenv("R2_PUBLIC_URL_BASE", "")
 
 
 # ============================================================
-# إعدادات محرك التوليد الجديد: Wan 2.2 14B (فيديو حقيقي متعدد المشاهد)
+# إعدادات محرك التوليد: LTX-Video (Lightricks/ltx-video-distilled)
 # ============================================================
-# لماذا تم الاستبدال: المحرك القديم (ByteDance/AnimateDiff-Lightning) كان
-# يُنتج مقاطع ~1 ثانية فقط بشخصية عامة لا تتبع النص المكتوب - قيد حقيقي في
-# النموذج نفسه عند 2-8 خطوات استدلال وبدون أي معامل مدة. تم التحقق حياً
-# (view_api) من Upsampler/wan-2-2-14b-text-to-video: نموذج فعلي يتبع النص
-# بدقة عالية، لكنه محدود بحد أقصى 5 ثوانٍ لكل استدعاء واحد (Lightning LoRA
-# بـ4 خطوات، 0.5-5.0 ثانية).
+# التبديل من Wan 2.2 14B إلى LTX-Video (نسخة "distilled" السريعة): الهدف
+# توفير حصة GPU المجانية (ZeroGPU) اليومية - LTX-Video أخف وأسرع بكثير من
+# Wan 2.2 14B لنفس مدة الفيديو، فيتبقى وقت GPU أكثر لعدد مشاهد أكبر بنفس
+# الحصة اليومية (٣٫٥ دقيقة مجاناً، أو ٢٥ دقيقة عبر HF PRO).
 #
-# لتحقيق "فيديو كامل" أطول من 5 ثوانٍ: نُقسِّم نص المستخدم إلى عدة "مشاهد"
-# قصيرة (كل سطر أو جملة = مشهد)، نولّد كل مشهد على حدة (~4.8 ثانية)، ثم
-# ندمجها بـ ffmpeg في فيديو واحد متسلسل. هذا هو المعنى الفعلي لعبارة "توليد
-# وفصل الفيديو المتسلسل" الظاهرة في واجهة الموقع.
+# تم التحقق حياً (view_api) من Lightricks/ltx-video-distilled: نموذج فعلي
+# نصّ-إلى-فيديو (وليس صورة-إلى-فيديو رغم أن القيمة الافتراضية لمعامل mode في
+# المساحة نفسها "image-to-video" - لهذا يجب تمرير mode="text-to-video" صراحةً
+# في كل استدعاء، وإلا يُنتج المشهد بوضع خاطئ تماماً). الحد الأقصى الحقيقي
+# لمدة المقطع الواحد 8.5 ثانية (أعلى من حد Wan البالغ 5.0 ثانية)، لكن نُبقي
+# طول المشهد عند نفس القيمة السابقة (4.8 ثانية) للحفاظ على نفس حسابات عدد
+# المشاهد/الباقات الموجودة دون تغيير سلوك الواجهة والأسعار.
 #
-# قيد حقيقي يجب معرفته: كل مشهد يستغرق تقريباً 30-50 ثانية على GPU مجاني
-# (ZeroGPU) شاملاً وقت التحميل. توليد 3 مشاهد متسلسلة قد يقترب من حد الوقت
-# المسموح لدالة Vercel. تم رفع الحد في vercel.json إلى 300 ثانية، لكن على
-# خطة Vercel Hobby العادية (بدون Fluid Compute مُفعَّل) الحد الفعلي 60 ثانية
-# فقط - إن ظهر خطأ Timeout عند اختيار باقة تسمح بأكثر من مشهد واحد، الحل هو
-# تفعيل Fluid Compute من إعدادات المشروع أو الترقية لخطة Pro.
+# improve_texture_flag تُترك False عمداً (خلاف الافتراضي True في المساحة
+# الحية): تفعيلها يشغّل تمريرة "multi-scale" إضافية تضاعف تقريباً وقت توليد
+# كل مشهد على الـGPU - إيقافها هو المصدر الرئيسي لتوفير الوقت الذي كان الهدف
+# الأساسي من هذا التبديل، مقابل جودة تفاصيل أبسط قليلاً (مقايضة مقصودة).
 HF_API_TOKEN = os.getenv("HF_API_TOKEN", "") or None
-WAN_SPACE_ID = os.getenv("WAN_SPACE_ID", "Upsampler/wan-2-2-14b-text-to-video")
-WAN_SPACE_API_NAME = "/generate_video"
+LTX_SPACE_ID = os.getenv("LTX_SPACE_ID", "Lightricks/ltx-video-distilled")
+LTX_SPACE_API_NAME = "/text_to_video"
 
-WAN_ASPECT_RATIO = "16:9 (832x480)"
-WAN_STEPS = 4  # القيمة الافتراضية المُحسّنة لهذا النموذج (Lightning LoRA بـ4 خطوات)
-WAN_NEGATIVE_PROMPT = (
-    "色调艳丽, 过曝, 静态, 细节模糊不清, 字幕, 风格, 作品, 画作, 画面, 静止, "
-    "整体发灰, 最差质量, 低质量, JPEG压缩残留, 丑陋的, 残缺的, 多余的手指, "
-    "画得不好的手部, 画得不好的脸部, 畸形的, 毁容的, 形态畸形的肢体, 手指融合, "
-    "静止不动的画面, 杂乱的背景, 三条腿, 背景人很多, 倒着走"
-)  # نفس القيمة الافتراضية للمساحة الحية - مُختبَرة وتُنتج جودة أفضل فعلياً
-WAN_SCENE_DURATION_SECONDS = 4.8  # قريب من الحد الأقصى الحقيقي للنموذج (5.0s)
-WAN_GUIDANCE_SCALE = 1.0
-WAN_GUIDANCE_SCALE_2 = 1.0
+LTX_NEGATIVE_PROMPT = "worst quality, inconsistent motion, blurry, jittery, distorted"
+LTX_HEIGHT = 512
+LTX_WIDTH = 704
+LTX_GUIDANCE_SCALE = 1.0  # القيمة الافتراضية الموصى بها لهذا النموذج (distilled/fast)
+LTX_IMPROVE_TEXTURE = False  # معطّلة عمداً لتسريع التوليد وتوفير حصة GPU (انظر الشرح أعلاه)
+SCENE_DURATION_SECONDS = 4.8  # نفس مدة المشهد السابقة (ضمن حد LTX الحقيقي 0.3-8.5s)
 
 MAX_RETRIES = 3
 RETRY_WAIT_QUEUE_BUSY = 20
@@ -433,21 +427,25 @@ def _delete_object_from_r2_sync(key: str) -> None:
 
 
 # ============================================================
-# استدعاء Wan 2.2 14B عبر gradio_client لتوليد مشهد واحد (~4.8 ثانية)
+# استدعاء LTX-Video عبر gradio_client لتوليد مشهد واحد (~4.8 ثانية)
 # ============================================================
 def _generate_scene_via_gradio_sync(prompt: str) -> str:
-    client = GradioClient(WAN_SPACE_ID, token=HF_API_TOKEN)
+    client = GradioClient(LTX_SPACE_ID, token=HF_API_TOKEN)
     result = client.predict(
-        prompt,
-        WAN_ASPECT_RATIO,
-        WAN_STEPS,
-        WAN_NEGATIVE_PROMPT,
-        WAN_SCENE_DURATION_SECONDS,
-        WAN_GUIDANCE_SCALE,
-        WAN_GUIDANCE_SCALE_2,
-        42,    # seed - يُتجاهل عملياً لأن randomize_seed=True أدناه
-        True,  # randomize_seed: كل مشهد يحصل على بذرة عشوائية لتنويع الحركة
-        api_name=WAN_SPACE_API_NAME,
+        prompt=prompt,
+        negative_prompt=LTX_NEGATIVE_PROMPT,
+        input_image_filepath=None,   # وضع نص-إلى-فيديو فقط - لا صورة إدخال
+        input_video_filepath=None,   # وضع نص-إلى-فيديو فقط - لا فيديو إدخال
+        height_ui=LTX_HEIGHT,
+        width_ui=LTX_WIDTH,
+        mode="text-to-video",  # يجب تمريرها صراحةً - افتراضي المساحة "image-to-video"
+        duration_ui=SCENE_DURATION_SECONDS,
+        ui_frames_to_use=9,  # لا تأثير لها في وضع نص-إلى-فيديو (خاصة بوضع فيديو-إلى-فيديو فقط)
+        seed_ui=42,    # يُتجاهل عملياً لأن randomize_seed=True أدناه
+        randomize_seed=True,  # كل مشهد يحصل على بذرة عشوائية لتنويع الحركة
+        ui_guidance_scale=LTX_GUIDANCE_SCALE,
+        improve_texture_flag=LTX_IMPROVE_TEXTURE,
+        api_name=LTX_SPACE_API_NAME,
     )
     # الإرجاع الحقيقي (video, seed) - الفيديو إما مسار نصي مباشر أو dict بمفتاح path
     video_value = result[0] if isinstance(result, (tuple, list)) else result
@@ -629,7 +627,7 @@ def _mux_narration_sync(video_bytes: bytes, narration_path: pathlib.Path) -> byt
 async def generate_stitched_video(prompt: str, max_scenes: int) -> tuple[bytes, int, bool]:
     """
     يولّد فيديو متعدد المشاهد كاملاً: يقسّم النص، يولّد كل مشهد تسلسلياً عبر
-    Wan 2.2 14B، يدمج الكل بـ ffmpeg، ثم يضيف رواية صوتية عربية حقيقية (gTTS)
+    LTX-Video، يدمج الكل بـ ffmpeg، ثم يضيف رواية صوتية عربية حقيقية (gTTS)
     فوق الفيديو الناتج. يعيد (بايتات الفيديو النهائي، عدد المشاهد الفعلي،
     هل تم تضمين الصوت فعلاً) - عدد المشاهد الفعلي وحالة الصوت تُستخدَمان لاحقاً
     لعرض الحقيقة الكاملة للمستخدم دون أي ادّعاء غير دقيق.
@@ -784,7 +782,7 @@ async def checkout(payload: CheckoutRequest):
 @app.post("/generate-video")
 async def generate_video(payload: GenerateVideoRequest):
     """
-    توليد حقيقي 100% عبر gradio_client + Wan 2.2 14B (Upsampler)، مع دمج
+    توليد حقيقي 100% عبر gradio_client + LTX-Video (Lightricks)، مع دمج
     متعدد المشاهد بـ ffmpeg لتجاوز حد الـ5 ثوانٍ الحقيقي لكل استدعاء واحد.
     لا يوجد أي مسار "محاكاة" في هذا الكود - أي نجاح معروض للمستخدم يعكس
     فيديو حقيقياً تم توليده فعلياً ورفعه إلى Cloudflare R2.
@@ -831,8 +829,8 @@ async def generate_video(payload: GenerateVideoRequest):
         "remaining_points": remaining_points,
         "quality": quality,
         "scene_count": actual_scene_count,
-        "scene_duration_seconds": WAN_SCENE_DURATION_SECONDS,
-        "total_duration_seconds": round(actual_scene_count * WAN_SCENE_DURATION_SECONDS, 1),
+        "scene_duration_seconds": SCENE_DURATION_SECONDS,
+        "total_duration_seconds": round(actual_scene_count * SCENE_DURATION_SECONDS, 1),
         "has_narration": has_narration,
         "is_unlimited": user["is_unlimited"],
     }
@@ -951,8 +949,8 @@ async def merge_scenes(payload: MergeScenesRequest):
         "remaining_points": remaining_points,
         "quality": quality,
         "scene_count": scene_count,
-        "scene_duration_seconds": WAN_SCENE_DURATION_SECONDS,
-        "total_duration_seconds": round(scene_count * WAN_SCENE_DURATION_SECONDS, 1),
+        "scene_duration_seconds": SCENE_DURATION_SECONDS,
+        "total_duration_seconds": round(scene_count * SCENE_DURATION_SECONDS, 1),
         "has_narration": has_narration,
         "is_unlimited": user["is_unlimited"],
     }
