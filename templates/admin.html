@@ -15,7 +15,7 @@
 </style>
 </head>
 <body>
-<div class="container py-5" style="max-width: 480px;">
+<div class="container py-5" style="max-width: 720px;">
 
   <h2 class="text-center mb-4">🔐 لوحة تحكم المدير</h2>
   <p class="text-center text-secondary small">
@@ -39,6 +39,44 @@
     is_unlimited = true) - وليس مجرد رسالة شكلية بدون أثر. ويُرفض تلقائياً
     (Fail Closed) إن لم يكن متغير البيئة ADMIN_SECRET مضبوطاً على السيرفر.
   </p>
+
+  <div class="card-glass p-4 mt-4">
+    <h5 class="fw-bold mb-3">📊 سجلات الأخطاء والأداء (آخر 24 ساعة)</h5>
+    <p class="text-secondary small">
+      يستخدم نفس كلمة السر الإدارية أعلاه. تُسجَّل كل طلبات الـAPI تلقائياً
+      (نجاح/تحذير/خطأ + مدة التنفيذ) عبر نظام مراقبة يعمل في الخلفية.
+    </p>
+    <button id="viewLogsBtn" class="btn btn-outline-info w-100 fw-bold mb-3">
+      🔄 تحديث السجلات
+    </button>
+    <div id="logsStatus" class="mb-3"></div>
+
+    <div id="logsSummaryWrap" class="table-responsive d-none mb-4">
+      <h6 class="fw-bold text-secondary">ملخص الأداء حسب المسار</h6>
+      <table class="table table-dark table-sm table-bordered align-middle">
+        <thead>
+          <tr>
+            <th>المسار</th><th>الطلبات</th><th>أخطاء</th><th>تحذيرات</th>
+            <th>متوسط (مللي ثانية)</th><th>أقصى (مللي ثانية)</th>
+          </tr>
+        </thead>
+        <tbody id="logsSummaryBody"></tbody>
+      </table>
+    </div>
+
+    <div id="logsRecentWrap" class="table-responsive d-none">
+      <h6 class="fw-bold text-secondary">آخر الأحداث</h6>
+      <table class="table table-dark table-sm table-bordered align-middle">
+        <thead>
+          <tr>
+            <th>الوقت</th><th>الطريقة</th><th>المسار</th><th>الحالة</th>
+            <th>المدة (مللي ثانية)</th><th>ملاحظة</th>
+          </tr>
+        </thead>
+        <tbody id="logsRecentBody"></tbody>
+      </table>
+    </div>
+  </div>
 
   <div class="text-center mt-3">
     <a href="/" class="text-secondary small text-decoration-none">← رجوع للصفحة الرئيسية</a>
@@ -87,6 +125,73 @@
     } finally {
       grantProBtn.disabled = false;
       grantProBtn.textContent = '👑 تفعيل باقة PRO ونقاط غير محدودة فعلياً';
+    }
+  });
+
+  const viewLogsBtn = document.getElementById('viewLogsBtn');
+  const logsStatus = document.getElementById('logsStatus');
+  const logsSummaryWrap = document.getElementById('logsSummaryWrap');
+  const logsSummaryBody = document.getElementById('logsSummaryBody');
+  const logsRecentWrap = document.getElementById('logsRecentWrap');
+  const logsRecentBody = document.getElementById('logsRecentBody');
+
+  function levelBadge(level) {
+    const map = { error: 'danger', warning: 'warning', info: 'secondary' };
+    return `<span class="badge bg-${map[level] || 'secondary'}">${level}</span>`;
+  }
+
+  viewLogsBtn.addEventListener('click', async () => {
+    const secret = secretInput.value.trim();
+    if (!secret) {
+      logsStatus.innerHTML = '<div class="alert alert-warning">⚠️ أدخل كلمة السر الإدارية أولاً.</div>';
+      return;
+    }
+
+    viewLogsBtn.disabled = true;
+    viewLogsBtn.textContent = '⏳ جاري التحميل...';
+    logsStatus.innerHTML = '';
+
+    try {
+      const res = await fetch('/api/admin/logs?key=' + encodeURIComponent(secret) + '&limit=100');
+      const data = await res.json();
+
+      if (!res.ok) {
+        logsStatus.innerHTML = '<div class="alert alert-danger">❌ ' + (data.detail || 'تعذر جلب السجلات.') + '</div>';
+        logsSummaryWrap.classList.add('d-none');
+        logsRecentWrap.classList.add('d-none');
+        return;
+      }
+
+      logsSummaryBody.innerHTML = (data.summary_24h || []).map(row => `
+        <tr>
+          <td>${row.endpoint}</td>
+          <td>${row.total_requests}</td>
+          <td>${row.error_count}</td>
+          <td>${row.warning_count}</td>
+          <td>${row.avg_duration_ms ?? '-'}</td>
+          <td>${row.max_duration_ms ?? '-'}</td>
+        </tr>
+      `).join('') || '<tr><td colspan="6" class="text-secondary">لا توجد بيانات بعد.</td></tr>';
+
+      logsRecentBody.innerHTML = (data.logs || []).map(row => `
+        <tr>
+          <td class="small">${row.created_at || '-'}</td>
+          <td>${row.method || '-'}</td>
+          <td class="small">${row.endpoint}</td>
+          <td>${levelBadge(row.level)} ${row.status_code ?? ''}</td>
+          <td>${row.duration_ms ?? '-'}</td>
+          <td class="small text-secondary">${(row.message || '').slice(0, 120)}</td>
+        </tr>
+      `).join('') || '<tr><td colspan="6" class="text-secondary">لا توجد سجلات بعد.</td></tr>';
+
+      logsSummaryWrap.classList.remove('d-none');
+      logsRecentWrap.classList.remove('d-none');
+      logsStatus.innerHTML = '<div class="alert alert-success">✅ تم تحديث السجلات (' + (data.logs || []).length + ' سجل).</div>';
+    } catch (err) {
+      logsStatus.innerHTML = '<div class="alert alert-danger">❌ تعذر الاتصال بالسيرفر: ' + err.message + '</div>';
+    } finally {
+      viewLogsBtn.disabled = false;
+      viewLogsBtn.textContent = '🔄 تحديث السجلات';
     }
   });
 </script>
