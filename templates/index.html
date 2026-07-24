@@ -101,6 +101,30 @@
   </div>
 
   <div class="card-glass p-4 mb-4">
+    <h5 class="fw-bold mb-1">📺 نشر على يوتيوب</h5>
+    <p class="text-secondary small mb-3">
+      نشر نص-آلي بمراجعة بشرية إلزامية: يملأ التطبيق رابط آخر فيديو ولّدته
+      تلقائياً، بس لازم تكتب أنت العنوان والوصف وتضغط النشر بنفسك - بلا نشر
+      تلقائي بدون مراجعتك (حماية لقناتك من سياسة "المحتوى غير الأصيل").
+      الخصوصية الافتراضية "خاص" عمداً - غيّرها لعام بوعي إذا تريد.
+    </p>
+    <label class="form-label small">رابط الفيديو</label>
+    <input type="text" id="youtubeVideoUrl" class="form-control mb-2" placeholder="يُملأ تلقائياً بعد كل توليد أو دمج">
+    <label class="form-label small">العنوان</label>
+    <input type="text" id="youtubeTitle" class="form-control mb-2" placeholder="عنوان الفيديو على يوتيوب">
+    <label class="form-label small">الوصف (اختياري)</label>
+    <textarea id="youtubeDescription" class="form-control mb-2" rows="2" placeholder="وصف الفيديو..."></textarea>
+    <label class="form-label small">الخصوصية</label>
+    <select id="youtubePrivacy" class="form-select mb-3">
+      <option value="private" selected>🔒 خاص (يشوفه بس حسابك)</option>
+      <option value="unlisted">🔗 غير مدرج (بس بمن يملك الرابط)</option>
+      <option value="public">🌍 عام (يشوفه الكل)</option>
+    </select>
+    <button id="youtubePublishBtn" class="btn btn-outline-light w-100">📺 نشر على يوتيوب</button>
+    <div id="youtubeStatusBox" class="mt-3 d-none"></div>
+  </div>
+
+  <div class="card-glass p-4 mb-4">
     <h5 class="fw-bold mb-1">💳 شحن النقاط وترقية الباقة</h5>
     <p class="text-secondary small mb-3">
       ⚠️ وضع تجريبي (Sandbox) - رمز التحقق التجريبي: <code>123456</code>. تحديث الباقة يحدث فعلياً في قاعدة البيانات.
@@ -273,12 +297,69 @@
       mergedResultVideo.src = data.video_url;
       mergedDownloadLink.href = data.video_url;
       mergeVideoBox.classList.remove('d-none');
+      document.getElementById('youtubeVideoUrl').value = data.video_url;
       setMergeStatus(`✅ تم دمج ${data.merged_count} فيديوهات بنجاح في فيديو واحد.`, 'success');
     } catch (err) {
       setMergeStatus('❌ تعذر الاتصال بالسيرفر: ' + err.message, 'danger');
     } finally {
       mergeVideosBtn.disabled = false;
       mergeVideosBtn.textContent = originalText;
+    }
+  });
+
+  // ============================================================
+  // النشر على يوتيوب - نص-آلي بمراجعة بشرية إلزامية (عنوان/وصف/خصوصية
+  // يكتبها المستخدم بنفسه، وضغطة نشر صريحة - بلا نشر تلقائي بعد التوليد)
+  // ============================================================
+  const youtubePublishBtn = document.getElementById('youtubePublishBtn');
+  const youtubeStatusBox = document.getElementById('youtubeStatusBox');
+
+  function setYoutubeStatus(message, type) {
+    youtubeStatusBox.innerHTML = message;
+    youtubeStatusBox.className = 'mt-3 alert alert-' + (type || 'secondary');
+    youtubeStatusBox.classList.remove('d-none');
+  }
+
+  youtubePublishBtn.addEventListener('click', async () => {
+    const video_url = document.getElementById('youtubeVideoUrl').value.trim();
+    const title = document.getElementById('youtubeTitle').value.trim();
+    const description = document.getElementById('youtubeDescription').value.trim();
+    const privacy_status = document.getElementById('youtubePrivacy').value;
+
+    if (!video_url) {
+      setYoutubeStatus('⚠️ ما أكو رابط فيديو - ولّد أو ادمج فيديو أولاً.', 'warning');
+      return;
+    }
+    if (!title) {
+      setYoutubeStatus('⚠️ الرجاء إدخال عنوان الفيديو.', 'warning');
+      return;
+    }
+
+    youtubeStatusBox.classList.add('d-none');
+    youtubePublishBtn.disabled = true;
+    const originalText = youtubePublishBtn.textContent;
+    youtubePublishBtn.textContent = '⏳ جاري الرفع ليوتيوب...';
+
+    try {
+      const res = await fetch('/api/youtube/publish', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ video_url, title, description, privacy_status }),
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        setYoutubeStatus('❌ ' + (data.detail || 'حدث خطأ غير متوقع أثناء النشر.'), 'danger');
+        return;
+      }
+      setYoutubeStatus(
+        `✅ تم النشر بنجاح! <a href="${data.youtube_url}" target="_blank" class="alert-link">شاهد الفيديو على يوتيوب</a>`,
+        'success'
+      );
+    } catch (err) {
+      setYoutubeStatus('❌ تعذر الاتصال بالسيرفر: ' + err.message, 'danger');
+    } finally {
+      youtubePublishBtn.disabled = false;
+      youtubePublishBtn.textContent = originalText;
     }
   });
 
@@ -355,6 +436,7 @@
       resultVideo.src = data.video_url;
       downloadLink.href = data.video_url;
       videoBox.classList.remove('d-none');
+      document.getElementById('youtubeVideoUrl').value = data.video_url;
       const narrationNote = data.has_narration
         ? 'مع رواية صوتية عربية تلقائية 🔊'
         : '⚠️ بدون صوت هذه المرة (فشل توليد الرواية الصوتية المجانية - الفيديو صامت لكنه حقيقي)';
