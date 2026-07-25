@@ -355,18 +355,24 @@ RETRY_WAIT_COLD_START = 25
 # أسماء الباقات القديمة (480p/720p/1080p) أصبحت الآن تعني عدد المشاهد/مدة
 # الفيديو الإجمالية - وليست دقة بكسل حقيقية (المخرج دائماً 832x480 لكل مشهد)،
 # تجنباً لأي وصف مضلِّل لدقة غير موجودة فعلياً في الفيديو الناتج.
-SCENE_TIER_TO_COUNT = {"480p": 1, "720p": 2, "1080p": 8}
+SCENE_TIER_TO_COUNT = {"480p": 1, "720p": 2, "1080p": 8, "gold": 12}
+# "gold" (سوبر ذهبي): باقة خاصة غير قابلة للشراء إطلاقاً - لا تظهر بصفحة الدفع
+# ولا يوجد لها أي مسار checkout. تُمنح حصراً عبر /api/admin/grant-gold بكلمة
+# سر ADMIN_SECRET، لصاحب المشروع نفسه. 12 مشهد ≈58 ثانية - تحذير: خطر تجاوز
+# مهلة Vercel (300 ثانية) أعلى وضوحاً من باقة PRO (8 مشاهد)، صاحب المشروع
+# اختار هذا الرقم بوعي كامل بهذا الخطر.
 # ملاحظة صادقة: 8 مشاهد × ~4.8 ثانية = ~38 ثانية فيديو، لكن التوليد الفعلي
 # لكل مشهد يستغرق ~30-45 ثانية على GPU مجاني (ZeroGPU) شاملاً وقت الطابور -
 # أي أن طلب 8 مشاهد قد يستغرق 240-360+ ثانية إجمالاً، وهذا قريب جداً أو قد
 # يتجاوز سقف Vercel (300 ثانية حتى مع Fluid Compute)، خصوصاً لو احتاج أي
 # مشهد إعادة محاولة (إزدحام/تحميل بارد). المستخدم صاحب المشروع اختار هذا
 # الرقم بوعي كامل بهذا الخطر (بدل قيمة أكثر أماناً كـ5 مشاهد).
-QUALITY_POINTS_COST = {"480p": 5, "720p": 10, "1080p": 20}
+QUALITY_POINTS_COST = {"480p": 5, "720p": 10, "1080p": 20, "gold": 0}
 PLAN_ALLOWED_QUALITY = {
     "free": ["480p"],
     "medium": ["480p", "720p"],
     "pro": ["480p", "720p", "1080p"],
+    "gold": ["480p", "720p", "1080p", "gold"],
 }
 
 # كلمة سر لوحة التحكم الإدارية - يجب ضبطها كمتغير بيئة حقيقي على Vercel.
@@ -907,6 +913,30 @@ async def admin_grant_pro(payload: AdminGrantRequest):
 
     user_id = get_current_user_id()
     set_user_plan_and_unlimited(user_id, "pro", True)
+    user = get_user_row(user_id)
+
+    return {
+        "success": True,
+        "plan": user["plan"],
+        "points": user["points"],
+        "is_unlimited": user["is_unlimited"],
+    }
+
+
+@app.post("/api/admin/grant-gold")
+async def admin_grant_gold(payload: AdminGrantRequest):
+    """
+    باقة 'سوبر ذهبي' (gold) - أعلى من PRO (12 مشهد ≈58 ثانية بدل 8 ≈38 ثانية).
+    خاصة بصاحب المشروع فقط: لا يوجد لها أي سعر في PAYMENT_PLANS ولا مسار شراء
+    من /api/checkout - الطريقة الوحيدة لتفعيلها هي هذا المسار، ومرفوض افتراضياً
+    (Fail Closed) ما لم يُضبط ADMIN_SECRET فعلياً على السيرفر - بنفس مبدأ
+    /api/admin/grant-pro أعلاه بالضبط.
+    """
+    if not ADMIN_SECRET or payload.key != ADMIN_SECRET:
+        raise HTTPException(status_code=403, detail="كلمة السر الإدارية غير صحيحة أو غير مُفعَّلة على السيرفر.")
+
+    user_id = get_current_user_id()
+    set_user_plan_and_unlimited(user_id, "gold", True)
     user = get_user_row(user_id)
 
     return {
