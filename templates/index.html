@@ -33,7 +33,9 @@
   </div>
 
   <div class="text-center mb-4">
-    {% if user.is_unlimited or user.plan == 'pro' %}
+    {% if user.plan == 'gold' %}
+      <span class="badge badge-plan" style="background: linear-gradient(90deg,#b8860b,#ffd700); color:#1a1a1a;">💎 باقة سوبر ذهبي (حتى 12 مشهد ≈58 ثانية) — غير محدود</span>
+    {% elif user.is_unlimited or user.plan == 'pro' %}
       <span class="badge bg-warning text-dark badge-plan">👑 باقة PRO مفعّلة (حتى 8 مشاهد ≈38 ثانية) — {{ user.points }} نقطة</span>
     {% elif user.plan == 'medium' %}
       <span class="badge bg-info text-dark badge-plan">⚡ الباقة المتوسطة (حتى مشهدين ≈10 ثوانٍ) — {{ user.points }} نقطة</span>
@@ -193,7 +195,7 @@
   // تحديد "الباقة" الفعلية للمستخدم من السيرفر بدل قيمة ثابتة - كانت النسخة
   // القديمة ترسل '1080p' دائماً بغض النظر عن باقة المستخدم الحقيقية، وهو خطأ
   // كان سيرفض توليد المستخدمين المجانيين/المتوسطين بلا سبب واضح لهم.
-  const userQualityTier = "{{ '1080p' if (user.is_unlimited or user.plan == 'pro') else ('720p' if user.plan == 'medium' else '480p') }}";
+  const userQualityTier = "{{ 'gold' if user.plan == 'gold' else ('1080p' if (user.is_unlimited or user.plan == 'pro') else ('720p' if user.plan == 'medium' else '480p')) }}";
 
   function setStatus(message, type) {
     statusBox.textContent = message;
