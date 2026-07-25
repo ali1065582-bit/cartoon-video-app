@@ -447,6 +447,17 @@
         + `≈${data.total_duration_seconds} ثانية إجمالاً، ${narrationNote}.`,
         'success'
       );
+
+      // إضافة سطر حالة النشر التلقائي على يوتيوب (يحتاج رابط HTML فعلي، لذا
+      // يُضاف عبر innerHTML بعد استدعاء setStatus النصي أعلاه وليس داخله).
+      if (data.youtube_publish_status === 'published' && data.youtube_url) {
+        statusBox.innerHTML += ` <br>📺 نُشر تلقائياً على يوتيوب (غير مدرج): `
+          + `<a href="${data.youtube_url}" target="_blank" rel="noopener">مشاهدة الفيديو</a>. `
+          + `راجعه ثم غيّره إلى "عام" من يوتيوب استوديو إذا حاب.`;
+      } else if (data.youtube_publish_status === 'failed') {
+        statusBox.innerHTML += ` <br>⚠️ فشل النشر التلقائي على يوتيوب (الفيديو نفسه سليم، بس ما انرفع): `
+          + `${data.youtube_publish_message || ''}`;
+      }
     } catch (err) {
       spinnerBox.classList.add('d-none');
       setStatus('❌ تعذر الاتصال بالسيرفر: ' + err.message, 'danger');
