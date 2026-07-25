@@ -50,6 +50,9 @@ import asyncio
 import pathlib
 import subprocess
 import tempfile
+import json
+import urllib.request
+import urllib.parse
 
 import boto3
 import psycopg2
@@ -333,7 +336,11 @@ HF_API_TOKEN = os.getenv("HF_API_TOKEN", "") or None
 LTX_SPACE_ID = os.getenv("LTX_SPACE_ID", "Lightricks/ltx-video-distilled")
 LTX_SPACE_API_NAME = "/text_to_video"
 
-LTX_NEGATIVE_PROMPT = "worst quality, inconsistent motion, blurry, jittery, distorted"
+LTX_NEGATIVE_PROMPT = (
+    "worst quality, inconsistent motion, blurry, jittery, distorted, "
+    "realistic human, photorealistic, live-action, real person, human face close-up, "
+    "portrait photography, nudity, nsfw, sexual content, adult content"
+)
 LTX_HEIGHT = 512
 LTX_WIDTH = 704
 LTX_GUIDANCE_SCALE = 1.0  # القيمة الافتراضية الموصى بها لهذا النموذج (distilled/fast)
@@ -538,6 +545,44 @@ def _delete_object_from_r2_sync(key: str) -> None:
 
 
 # ============================================================
+# سلامة البرومبت: ترجمة + توصيف كرتوني إلزامي قبل إرساله لـ LTX-Video
+# ------------------------------------------------------------
+# السبب: LTX-Video-distilled مدرَّب أساساً على نصوص إنكليزية. إرسال نص عربي
+# خام كما كان يحدث سابقاً يعني أن الموديل عملياً "لا يفهم" البرومبت، فيرجع
+# فيديو شبه عشوائي من بيانات تدريبه (غالباً لقطات بشر حقيقيين/بورتريهات) -
+# غير مناسب إطلاقاً لتطبيق كرتوني موجّه للأطفال. الحل: (1) ترجمة أفضل-جهد
+# للإنكليزية (2) إضافة بادئة أسلوب كرتوني صريحة (3) negative_prompt أقوى
+# يمنع البشر الواقعيين/المحتوى الجنسي (انظر LTX_NEGATIVE_PROMPT أعلاه).
+# الترجمة "أفضل-جهد" فقط: أي فشل (شبكة، حصة، تنسيق غير متوقع) يُعاد فيه
+# النص الأصلي بصمت دون إسقاط الطلب - التوليد يجب ألا يتعطل بسبب الترجمة.
+# ============================================================
+CARTOON_STYLE_PREFIX = (
+    "children's cartoon style, 2D animation, colorful, cute animal characters, "
+    "family-friendly, wholesome, no realistic humans, no photorealistic imagery, "
+    "no live-action footage. Scene: "
+)
+
+
+def _translate_to_english_best_effort(text: str) -> str:
+    try:
+        params = urllib.parse.urlencode({"client": "gtx", "sl": "auto", "tl": "en", "dt": "t", "q": text})
+        url = f"https://translate.googleapis.com/translate_a/single?{params}"
+        req = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0"})
+        with urllib.request.urlopen(req, timeout=8) as resp:
+            data = json.loads(resp.read().decode("utf-8"))
+        translated = "".join(segment[0] for segment in data[0] if segment and segment[0])
+        translated = translated.strip()
+        return translated or text
+    except Exception:  # noqa: BLE001 - الترجمة أفضل-جهد فقط، لا تُسقط التوليد أبداً
+        return text
+
+
+def _build_safe_scene_prompt(scene_text: str) -> str:
+    english_scene = _translate_to_english_best_effort(scene_text)
+    return CARTOON_STYLE_PREFIX + english_scene
+
+
+# ============================================================
 # استدعاء LTX-Video عبر gradio_client لتوليد مشهد واحد (~4.8 ثانية)
 # ============================================================
 def _generate_scene_via_gradio_sync(prompt: str) -> str:
@@ -592,11 +637,15 @@ def _classify_gradio_error(exc: Exception) -> tuple[bool, float, str]:
 
 
 async def _generate_one_scene_with_retry(prompt: str) -> pathlib.Path:
-    """يولّد مشهداً واحداً مع إعادة محاولة تلقائية، ويعيد مساراً محلياً لملف الفيديو."""
+    """يولّد مشهداً واحداً مع إعادة محاولة تلقائية، ويعيد مساراً محلياً لملف الفيديو.
+    قبل الإرسال الفعلي لـ LTX-Video، يُحوَّل نص المشهد إلى برومبت آمن
+    (ترجمة أفضل-جهد + بادئة أسلوب كرتوني) عبر _build_safe_scene_prompt -
+    انظر الشرح أعلاه لسبب هذه الخطوة (حماية من محتوى غير مناسب للأطفال)."""
+    safe_prompt = await run_in_threadpool(_build_safe_scene_prompt, prompt)
     last_message = "⚠️ فشل توليد المشهد لسبب غير معروف."
     for attempt in range(1, MAX_RETRIES + 1):
         try:
-            video_path = await run_in_threadpool(_generate_scene_via_gradio_sync, prompt)
+            video_path = await run_in_threadpool(_generate_scene_via_gradio_sync, safe_prompt)
             return pathlib.Path(video_path)
         except VideoGenerationError:
             raise
