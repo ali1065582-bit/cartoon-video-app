@@ -1196,6 +1196,9 @@ async def merge_scenes(payload: MergeScenesRequest):
         remaining_points = update_user_points(user_id, -cost)
 
     scene_count = len(payload.scene_keys)
+
+    youtube_result = await _auto_publish_to_youtube(video_url, payload.scenes_text)
+
     return {
         "video_url": video_url,
         "remaining_points": remaining_points,
@@ -1205,6 +1208,7 @@ async def merge_scenes(payload: MergeScenesRequest):
         "total_duration_seconds": round(scene_count * SCENE_DURATION_SECONDS, 1),
         "has_narration": has_narration,
         "is_unlimited": user["is_unlimited"],
+        **youtube_result,
     }
 
 
@@ -1297,6 +1301,46 @@ def _youtube_upload_sync(video_bytes: bytes, title: str, description: str, priva
     while response is None:
         _status, response = request.next_chunk()
     return response
+
+
+# ============================================================
+# نشر تلقائي كامل على يوتيوب بعد كل توليد فيديو (بلا أي تدخل بشري في لحظة النشر)
+# ------------------------------------------------------------
+# قرار مقصود: الخصوصية الافتراضية دائماً "غير مدرج" (unlisted) - وليس "عام" -
+# حتى مع النشر الآلي الكامل. السبب: أي خلل مستقبلي بجودة/محتوى الفيديو (كما
+# حدث فعلاً سابقاً مع خلل توليد محتوى غير متطابق مع السيناريو) يبقى أثره
+# محدوداً على القناة (الفيديو موجود، بس ما يظهر بالبحث ولا يُقترَح لأحد)
+# لين يراجعه صاحب الحساب ويحوّله يدوياً لعام من يوتيوب استوديو. هذا يوازن بين
+# طلب المستخدم (نشر أوتوماتيكي بلا انتظار) وحماية القناة من سياسة "المحتوى
+# غير الأصيل" لو تكرر أي خلل توليد لم نكتشفه بعد.
+# فشل النشر (توكن منتهي، حصة يوتيوب، انقطاع مؤقت...) لا يُسقط طلب توليد الفيديو
+# إطلاقاً - المستخدم يحصل على فيديوه دائماً، والنشر مجرد إضافة أفضل-جهد فوقه.
+# ============================================================
+def _auto_publish_title_from_scenes(scenes_text: list[str]) -> str:
+    first_line = next((t.strip() for t in scenes_text if t.strip()), "")
+    title = first_line if first_line else "فيديو كرتوني مولَّد بالذكاء الاصطناعي"
+    return title[:95]
+
+
+async def _auto_publish_to_youtube(video_url: str, scenes_text: list[str]) -> dict:
+    if not (YOUTUBE_CLIENT_ID and YOUTUBE_CLIENT_SECRET and YOUTUBE_REFRESH_TOKEN):
+        return {"youtube_publish_status": "skipped", "youtube_publish_message": "حساب يوتيوب غير مربوط بعد."}
+
+    title = _auto_publish_title_from_scenes(scenes_text)
+    description = ". ".join(t.strip() for t in scenes_text if t.strip())
+    try:
+        key = _extract_r2_key_from_public_url(video_url)
+        video_bytes = await run_in_threadpool(_download_bytes_from_r2_sync, key)
+        result = await run_in_threadpool(_youtube_upload_sync, video_bytes, title, description, "unlisted")
+        video_id = result.get("id")
+        return {
+            "youtube_publish_status": "published",
+            "youtube_video_id": video_id,
+            "youtube_url": f"https://www.youtube.com/watch?v={video_id}" if video_id else None,
+            "youtube_privacy_status": "unlisted",
+        }
+    except Exception as exc:  # noqa: BLE001 - فشل النشر أفضل-جهد فقط، لا يُسقط الفيديو أبداً
+        return {"youtube_publish_status": "failed", "youtube_publish_message": f"⚠️ فشل النشر التلقائي على يوتيوب: {exc}"}
 
 
 @app.post("/api/youtube/publish")
