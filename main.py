@@ -57,7 +57,7 @@ import urllib.parse
 import boto3
 import psycopg2
 import psycopg2.extras
-from fastapi import FastAPI, HTTPException, Request
+from fastapi import FastAPI, HTTPException, Request, File, UploadFile, Form
 from fastapi.responses import HTMLResponse, Response
 from fastapi.templating import Jinja2Templates
 from fastapi.concurrency import run_in_threadpool
@@ -591,18 +591,21 @@ def _build_safe_scene_prompt(scene_text: str) -> str:
 # ============================================================
 # استدعاء LTX-Video عبر gradio_client لتوليد مشهد واحد (~4.8 ثانية)
 # ============================================================
-def _generate_scene_via_gradio_sync(prompt: str) -> str:
+def _generate_scene_via_gradio_sync(prompt: str, image_path: str | None = None) -> str:
+    # image_path مُمرَّرة => وضع "صورة-إلى-فيديو" (المستخدم رفع صورة مرجعية مع
+    # البرومت) بدل "نص-إلى-فيديو" الافتراضي. نفس المساحة (Lightricks) تدعم
+    # الوضعين، والتبديل بينهما يكون فقط عبر mode + input_image_filepath.
     client = GradioClient(LTX_SPACE_ID, token=HF_API_TOKEN)
     result = client.predict(
         prompt=prompt,
         negative_prompt=LTX_NEGATIVE_PROMPT,
-        input_image_filepath=None,   # وضع نص-إلى-فيديو فقط - لا صورة إدخال
-        input_video_filepath=None,   # وضع نص-إلى-فيديو فقط - لا فيديو إدخال
+        input_image_filepath=image_path,
+        input_video_filepath=None,   # لا فيديو إدخال بأي من الوضعين المدعومين هنا
         height_ui=LTX_HEIGHT,
         width_ui=LTX_WIDTH,
-        mode="text-to-video",  # يجب تمريرها صراحةً - افتراضي المساحة "image-to-video"
+        mode="image-to-video" if image_path else "text-to-video",
         duration_ui=SCENE_DURATION_SECONDS,
-        ui_frames_to_use=9,  # لا تأثير لها في وضع نص-إلى-فيديو (خاصة بوضع فيديو-إلى-فيديو فقط)
+        ui_frames_to_use=9,  # لا تأثير لها إلا بوضع فيديو-إلى-فيديو (غير مستخدم هنا)
         seed_ui=42,    # يُتجاهل عملياً لأن randomize_seed=True أدناه
         randomize_seed=True,  # كل مشهد يحصل على بذرة عشوائية لتنويع الحركة
         ui_guidance_scale=LTX_GUIDANCE_SCALE,
@@ -642,16 +645,18 @@ def _classify_gradio_error(exc: Exception) -> tuple[bool, float, str]:
     return False, 0, f"⚠️ خطأ غير متوقع أثناء توليد الفيديو: {exc}"
 
 
-async def _generate_one_scene_with_retry(prompt: str) -> pathlib.Path:
+async def _generate_one_scene_with_retry(prompt: str, image_path: str | None = None) -> pathlib.Path:
     """يولّد مشهداً واحداً مع إعادة محاولة تلقائية، ويعيد مساراً محلياً لملف الفيديو.
     قبل الإرسال الفعلي لـ LTX-Video، يُحوَّل نص المشهد إلى برومبت آمن
     (ترجمة أفضل-جهد + بادئة أسلوب كرتوني) عبر _build_safe_scene_prompt -
-    انظر الشرح أعلاه لسبب هذه الخطوة (حماية من محتوى غير مناسب للأطفال)."""
+    انظر الشرح أعلاه لسبب هذه الخطوة (حماية من محتوى غير مناسب للأطفال).
+    إن مُرِّرت image_path (ميزة "صورة + برومت")، يُستخدَم وضع صورة-إلى-فيديو
+    بدل نص-إلى-فيديو - انظر _generate_scene_via_gradio_sync."""
     safe_prompt = await run_in_threadpool(_build_safe_scene_prompt, prompt)
     last_message = "⚠️ فشل توليد المشهد لسبب غير معروف."
     for attempt in range(1, MAX_RETRIES + 1):
         try:
-            video_path = await run_in_threadpool(_generate_scene_via_gradio_sync, safe_prompt)
+            video_path = await run_in_threadpool(_generate_scene_via_gradio_sync, safe_prompt, image_path)
             return pathlib.Path(video_path)
         except VideoGenerationError:
             raise
@@ -1142,6 +1147,79 @@ async def generate_scene(payload: GenerateSceneRequest):
     scene_key = f"scenes-tmp/{uuid.uuid4().hex}.mp4"
     await run_in_threadpool(_upload_bytes_to_r2_sync, clip_bytes, scene_key)
     return {"scene_key": scene_key}
+
+
+# ============================================================
+# ميزة "صورة + برومت": توليد فيديو واحد (~4.8 ثانية) عبر LTX-Video بوضع
+# صورة-إلى-فيديو، مع رواية صوتية اختيارية فوقه ونشر تلقائي على يوتيوب (نفس
+# منطق /api/merge-scenes بالضبط) - انظر _auto_publish_to_youtube أعلاه.
+# ============================================================
+ALLOWED_IMAGE_CONTENT_TYPES = {"image/jpeg", "image/png", "image/webp"}
+MAX_IMAGE_BYTES = 8 * 1024 * 1024  # 8MB - كافٍ لصورة مرجعية، يمنع رفع ملفات ضخمة عرضاً
+
+
+@app.post("/api/generate-image-video")
+async def generate_image_video(
+    prompt: str = Form(...),
+    voice: str = Form(DEFAULT_NARRATION_VOICE),
+    image: UploadFile = File(...),
+):
+    prompt = (prompt or "").strip()
+    if not prompt:
+        raise HTTPException(status_code=400, detail="الرجاء كتابة وصف للفيديو المطلوب من الصورة.")
+
+    if image.content_type not in ALLOWED_IMAGE_CONTENT_TYPES:
+        raise HTTPException(status_code=400, detail="صيغة صورة غير مدعومة. استخدم JPG أو PNG أو WEBP.")
+
+    image_bytes = await image.read()
+    if not image_bytes:
+        raise HTTPException(status_code=400, detail="ملف الصورة فارغ.")
+    if len(image_bytes) > MAX_IMAGE_BYTES:
+        raise HTTPException(status_code=400, detail="حجم الصورة كبير جداً (الحد الأقصى 8MB).")
+
+    user_id = get_current_user_id()
+    user = get_user_row(user_id)
+    cost = 0
+    if not user["is_unlimited"]:
+        cost = QUALITY_POINTS_COST.get("480p", 5)
+        if user["points"] < cost:
+            raise HTTPException(status_code=402, detail="رصيدك غير كافٍ لتوليد فيديو من صورة.")
+
+    suffix = pathlib.Path(image.filename or "").suffix or ".jpg"
+    with tempfile.TemporaryDirectory() as tmp_dir:
+        image_path = pathlib.Path(tmp_dir) / f"input{suffix}"
+        image_path.write_bytes(image_bytes)
+
+        try:
+            clip_path = await _generate_one_scene_with_retry(prompt, image_path=str(image_path))
+            video_bytes = clip_path.read_bytes()
+
+            has_narration = False
+            try:
+                narration_path = await _generate_narration_async(prompt, _resolve_narration_voice(voice))
+                video_bytes = await run_in_threadpool(_mux_narration_sync, video_bytes, narration_path)
+                has_narration = True
+            except Exception as exc:  # noqa: BLE001 - فشل الصوت لا يُسقط الفيديو الصامت الناجح
+                print(f"⚠️ تحذير: فشل توليد/إضافة الرواية الصوتية لفيديو الصورة: {exc}")
+
+            video_url = await upload_generated_video(video_bytes)
+        except VideoGenerationError as exc:
+            raise HTTPException(status_code=exc.status_code, detail=exc.message)
+
+    remaining_points = user["points"]
+    if not user["is_unlimited"] and cost:
+        remaining_points = update_user_points(user_id, -cost)
+
+    youtube_result = await _auto_publish_to_youtube(video_url, [prompt])
+
+    return {
+        "video_url": video_url,
+        "remaining_points": remaining_points,
+        "scene_duration_seconds": SCENE_DURATION_SECONDS,
+        "has_narration": has_narration,
+        "is_unlimited": user["is_unlimited"],
+        **youtube_result,
+    }
 
 
 @app.post("/api/merge-scenes")
