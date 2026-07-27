@@ -336,6 +336,18 @@ HF_API_TOKEN = os.getenv("HF_API_TOKEN", "") or None
 LTX_SPACE_ID = os.getenv("LTX_SPACE_ID", "Lightricks/ltx-video-distilled")
 LTX_SPACE_API_NAME = "/text_to_video"
 
+# ============================================================
+# مساحة Wav2Lip لمزامنة الشفاه (Lip-Sync) - ميزة "صورة + برومت" تستخدمها
+# حصراً حين المستخدم يفعّل خيار "الوجه يتكلم فعلياً" في الواجهة. تختلف كلياً
+# عن LTX-Video: تاخذ صورة ثابتة + ملف صوتي (الرواية المولَّدة من النص) وترجع
+# فيديو الشفاه فيه متزامنة فعلياً مع الصوت - تقنية Wav2Lip الحقيقية (مو محاكاة).
+# تم التحقق حياً (view_api) من manavisrani07/gradio-lipsync-wav2lip: مساحة
+# فعلية تعمل، endpoint فعلي /generate بمدخلات (video, audio, checkpoint...).
+# ============================================================
+LIPSYNC_SPACE_ID = os.getenv("LIPSYNC_SPACE_ID", "manavisrani07/gradio-lipsync-wav2lip")
+LIPSYNC_API_NAME = "/generate"
+LIPSYNC_CHECKPOINT = "wav2lip_gan"  # جودة أعلى من "wav2lip" العادي (نفس مدة المعالجة تقريباً)
+
 LTX_NEGATIVE_PROMPT = (
     "worst quality, inconsistent motion, blurry, jittery, distorted, "
     "realistic human, photorealistic, live-action, real person, human face close-up, "
@@ -625,6 +637,26 @@ def _extract_video_path(value) -> str:
     if isinstance(value, str) and value:
         return value
     raise VideoGenerationError("⚠️ شكل استجابة غير متوقع من مساحة التوليد.", status_code=502)
+
+
+def _generate_lipsync_video_sync(image_path: str, audio_path: str) -> str:
+    """يستدعي مساحة Wav2Lip الحقيقية لمزامنة شفاه الصورة مع ملف الصوت المُعطى.
+    يعيد مساراً محلياً لفيديو الشفاه الناتج (بدون رواية مدموجة - الصوت أصلاً
+    جزء من الفيديو الناتج من Wav2Lip نفسه، فلا حاجة لـ_mux_narration_sync)."""
+    client = GradioClient(LIPSYNC_SPACE_ID)
+    result = client.predict(
+        video=image_path,
+        audio=audio_path,
+        checkpoint=LIPSYNC_CHECKPOINT,
+        no_smooth=0,
+        resize_factor=10,
+        pad_top=0,
+        pad_bottom=0,
+        pad_left=1,
+        api_name=LIPSYNC_API_NAME,
+    )
+    video_value = result.get("video") if isinstance(result, dict) else result
+    return _extract_video_path(video_value)
 
 
 def _classify_gradio_error(exc: Exception) -> tuple[bool, float, str]:
@@ -1162,8 +1194,16 @@ MAX_IMAGE_BYTES = 8 * 1024 * 1024  # 8MB - كافٍ لصورة مرجعية، ي
 async def generate_image_video(
     prompt: str = Form(...),
     voice: str = Form(DEFAULT_NARRATION_VOICE),
+    talking_mode: bool = Form(False),
     image: UploadFile = File(...),
 ):
+    """توليد فيديو من صورة + برومت. وضعان:
+    1) الافتراضي (talking_mode=False): حركة عامة على الصورة عبر LTX-Video
+       image-to-video، مع رواية صوتية فوقها بلا مزامنة شفاه.
+    2) talking_mode=True: "الوجه يتكلم فعلياً" - يولَّد صوت الرواية أولاً، ثم
+       يُمرَّر مع الصورة الأصلية لمساحة Wav2Lip الحقيقية لمزامنة الشفاه فعلياً
+       مع الكلام - هذا هو الوضع المناسب لصور بورتريه بشرية حقيقية (بعكس
+       LTX-Video الذي بادئته المقصودة أصلاً "كرتوني بلا بشر حقيقيين")."""
     prompt = (prompt or "").strip()
     if not prompt:
         raise HTTPException(status_code=400, detail="الرجاء كتابة وصف للفيديو المطلوب من الصورة.")
@@ -1190,17 +1230,27 @@ async def generate_image_video(
         image_path = pathlib.Path(tmp_dir) / f"input{suffix}"
         image_path.write_bytes(image_bytes)
 
+        has_narration = False
         try:
-            clip_path = await _generate_one_scene_with_retry(prompt, image_path=str(image_path))
-            video_bytes = clip_path.read_bytes()
-
-            has_narration = False
-            try:
+            if talking_mode:
                 narration_path = await _generate_narration_async(prompt, _resolve_narration_voice(voice))
-                video_bytes = await run_in_threadpool(_mux_narration_sync, video_bytes, narration_path)
                 has_narration = True
-            except Exception as exc:  # noqa: BLE001 - فشل الصوت لا يُسقط الفيديو الصامت الناجح
-                print(f"⚠️ تحذير: فشل توليد/إضافة الرواية الصوتية لفيديو الصورة: {exc}")
+                try:
+                    lip_path = await run_in_threadpool(
+                        _generate_lipsync_video_sync, str(image_path), str(narration_path)
+                    )
+                except Exception as exc:  # noqa: BLE001 - خطأ حقيقي من مساحة Wav2Lip يُعرَض بصدق
+                    raise VideoGenerationError(f"⚠️ فشل توليد فيديو مزامنة الشفاه: {exc}", status_code=502)
+                video_bytes = pathlib.Path(lip_path).read_bytes()
+            else:
+                clip_path = await _generate_one_scene_with_retry(prompt, image_path=str(image_path))
+                video_bytes = clip_path.read_bytes()
+                try:
+                    narration_path = await _generate_narration_async(prompt, _resolve_narration_voice(voice))
+                    video_bytes = await run_in_threadpool(_mux_narration_sync, video_bytes, narration_path)
+                    has_narration = True
+                except Exception as exc:  # noqa: BLE001 - فشل الصوت لا يُسقط الفيديو الصامت الناجح
+                    print(f"⚠️ تحذير: فشل توليد/إضافة الرواية الصوتية لفيديو الصورة: {exc}")
 
             video_url = await upload_generated_video(video_bytes)
         except VideoGenerationError as exc:
@@ -1217,6 +1267,7 @@ async def generate_image_video(
         "remaining_points": remaining_points,
         "scene_duration_seconds": SCENE_DURATION_SECONDS,
         "has_narration": has_narration,
+        "talking_mode": talking_mode,
         "is_unlimited": user["is_unlimited"],
         **youtube_result,
     }
