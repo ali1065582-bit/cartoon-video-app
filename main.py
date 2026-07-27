@@ -1287,8 +1287,6 @@ async def generate_image_video(
     if not user["is_unlimited"] and cost:
         remaining_points = update_user_points(user_id, -cost)
 
-    youtube_result = await _auto_publish_to_youtube(video_url, [prompt])
-
     return {
         "video_url": video_url,
         "remaining_points": remaining_points,
@@ -1298,7 +1296,6 @@ async def generate_image_video(
         "has_narration": has_narration,
         "talking_mode": talking_mode,
         "is_unlimited": user["is_unlimited"],
-        **youtube_result,
     }
 
 
@@ -1355,8 +1352,6 @@ async def merge_scenes(payload: MergeScenesRequest):
 
     scene_count = len(payload.scene_keys)
 
-    youtube_result = await _auto_publish_to_youtube(video_url, payload.scenes_text)
-
     return {
         "video_url": video_url,
         "remaining_points": remaining_points,
@@ -1366,7 +1361,6 @@ async def merge_scenes(payload: MergeScenesRequest):
         "total_duration_seconds": round(scene_count * SCENE_DURATION_SECONDS, 1),
         "has_narration": has_narration,
         "is_unlimited": user["is_unlimited"],
-        **youtube_result,
     }
 
 
