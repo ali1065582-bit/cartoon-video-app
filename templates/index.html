@@ -163,12 +163,16 @@
     <h5 class="fw-bold mb-1">🖼️ صورة + برومت (تصميم فيديو من صورتك)</h5>
     <p class="text-secondary small mb-3">
       ارفع صورة (JPG/PNG/WEBP، حتى 8MB) واكتب وصف الحركة المطلوبة - LTX-Video
-      يحرّك الصورة فعلياً بوضع "صورة-إلى-فيديو" (~5 ثوانٍ)، مع رواية صوتية
-      عربية اختيارية فوقه ونشر تلقائي على يوتيوب (غير مدرج) بنفس منطق التوليد
-      العادي أعلاه.
+      يحرّك الصورة فعلياً بوضع "صورة-إلى-فيديو". اكتب أكثر من سطر لفيديو أطول:
+      كل سطر = مشهد ~4.8 ثانية من نفس الصورة يندمج مع البقية (عدد المشاهد
+      المسموح حسب باقتك، نفس نظام الخاصية الرئيسية أعلاه)، مع رواية صوتية
+      عربية ونشر تلقائي على يوتيوب (غير مدرج).
     </p>
     <input type="file" id="imageUploadInput" class="form-control mb-2" accept="image/png,image/jpeg,image/webp">
-    <textarea id="imagePromptInput" class="form-control mb-2" rows="2" placeholder="وصف الحركة المطلوبة على الصورة، مثال: الأرنبة تقفز بفرح وسط الحديقة"></textarea>
+    <textarea id="imagePromptInput" class="form-control mb-2" rows="3" placeholder="اكتب كل مشهد بسطر منفصل لفيديو أطول (كل سطر ~4.8 ثانية من نفس الصورة)، مثال:
+الأرنبة تقفز بفرح وسط الحديقة
+الأرنبة تجري خلف فراشة ملوّنة
+الأرنبة تستلقي وتضحك"></textarea>
     <!-- ملاحظة: خيار "الوجه يتكلم فعلياً" (Wav2Lip) مخفي مؤقتاً من الواجهة لأن
          مساحة manavisrani07/gradio-lipsync-wav2lip المجانية على Hugging Face معطلة
          حالياً (AppError من السيرفر نفسه)، وكل البدائل المجانية الأخرى إما متوقفة
@@ -392,6 +396,7 @@
       form.append('prompt', prompt);
       form.append('voice', voiceSelect.value);
       form.append('talking_mode', 'false'); // مؤقتاً معطّل من الواجهة، راجع الملاحظة أعلاه
+      form.append('quality', userQualityTier); // نفس جودة/عدد مشاهد باقة المستخدم في الخاصية الرئيسية
 
       const res = await fetch('/api/generate-image-video', { method: 'POST', body: form });
       const data = await res.json();
@@ -414,7 +419,10 @@
       const modeNote = data.talking_mode
         ? 'مع مزامنة شفاه حقيقية (Wav2Lip) 👄'
         : 'عبر LTX-Video';
-      setImageStatus(`✅ تم توليد الفيديو من الصورة فعلياً ${modeNote}، ${narrationNote}.`, 'success');
+      const sceneNote = data.scene_count > 1
+        ? ` - ${data.scene_count} مشاهد مدمجة (~${data.scene_duration_seconds} ثانية إجمالاً)`
+        : '';
+      setImageStatus(`✅ تم توليد الفيديو من الصورة فعلياً ${modeNote}${sceneNote}، ${narrationNote}.`, 'success');
 
       if (data.youtube_publish_status === 'published' && data.youtube_url) {
         imageVideoStatusBox.innerHTML += ` <br>📺 نُشر تلقائياً على يوتيوب (غير مدرج): `
