@@ -156,6 +156,7 @@
       <h5 class="mb-2">🎞️ الفيديو الناتج</h5>
       <video id="resultVideo" class="w-100 rounded" controls></video>
       <a id="downloadLink" class="btn btn-outline-success mt-2 w-100" download>⬇️ تحميل الفيديو</a>
+      <button type="button" class="btn btn-outline-light mt-2 w-100 go-publish-btn" data-video-target="resultVideo">📺 انشر على يوتيوب</button>
     </div>
   </div>
 
@@ -166,7 +167,7 @@
       يحرّك الصورة فعلياً بوضع "صورة-إلى-فيديو". اكتب أكثر من سطر لفيديو أطول:
       كل سطر = مشهد ~4.8 ثانية من نفس الصورة يندمج مع البقية (عدد المشاهد
       المسموح حسب باقتك، نفس نظام الخاصية الرئيسية أعلاه)، مع رواية صوتية
-      عربية ونشر تلقائي على يوتيوب (غير مدرج).
+      عربية - والنشر على يوتيوب يدوي بضغطة زر بعد إنتاج الفيديو (راجع أولاً).
     </p>
     <input type="file" id="imageUploadInput" class="form-control mb-2" accept="image/png,image/jpeg,image/webp">
     <textarea id="imagePromptInput" class="form-control mb-2" rows="3" placeholder="اكتب كل مشهد بسطر منفصل لفيديو أطول (كل سطر ~4.8 ثانية من نفس الصورة)، مثال:
@@ -188,6 +189,7 @@
     <div id="imageVideoBox" class="mt-3 d-none">
       <video id="imageResultVideo" class="w-100 rounded" controls></video>
       <a id="imageDownloadLink" class="btn btn-outline-success mt-2 w-100" download>⬇️ تحميل الفيديو</a>
+      <button type="button" class="btn btn-outline-light mt-2 w-100 go-publish-btn" data-video-target="imageResultVideo">📺 انشر على يوتيوب</button>
     </div>
   </div>
 
@@ -205,6 +207,7 @@
     <div id="mergeVideoBox" class="mt-3 d-none">
       <video id="mergedResultVideo" class="w-100 rounded" controls></video>
       <a id="mergedDownloadLink" class="btn btn-outline-success mt-2 w-100" download>⬇️ تحميل الفيديو المدموج</a>
+      <button type="button" class="btn btn-outline-light mt-2 w-100 go-publish-btn" data-video-target="mergedResultVideo">📺 انشر على يوتيوب</button>
     </div>
   </div>
 
@@ -423,13 +426,6 @@
         ? ` - ${data.scene_count} مشاهد مدمجة (~${data.scene_duration_seconds} ثانية إجمالاً)`
         : '';
       setImageStatus(`✅ تم توليد الفيديو من الصورة فعلياً ${modeNote}${sceneNote}، ${narrationNote}.`, 'success');
-
-      if (data.youtube_publish_status === 'published' && data.youtube_url) {
-        imageVideoStatusBox.innerHTML += ` <br>📺 نُشر تلقائياً على يوتيوب (غير مدرج): `
-          + `<a href="${data.youtube_url}" target="_blank" rel="noopener">مشاهدة الفيديو</a>.`;
-      } else if (data.youtube_publish_status === 'failed') {
-        imageVideoStatusBox.innerHTML += ` <br>⚠️ فشل النشر التلقائي على يوتيوب: ${data.youtube_publish_message || ''}`;
-      }
     } catch (err) {
       imageVideoSpinner.classList.add('d-none');
       setImageStatus('❌ تعذر الاتصال بالسيرفر: ' + err.message, 'danger');
@@ -495,6 +491,21 @@
   // النشر على يوتيوب - نص-آلي بمراجعة بشرية إلزامية (عنوان/وصف/خصوصية
   // يكتبها المستخدم بنفسه، وضغطة نشر صريحة - بلا نشر تلقائي بعد التوليد)
   // ============================================================
+  // أزرار "انشر على يوتيوب" الموجودة تحت كل نتيجة فيديو (رئيسي/صورة/دمج) -
+  // تملأ رابط الفيديو تلقائياً بس ما تنشر شي لحالها، تنقل المستخدم فقط لبطاقة
+  // النشر اليدوي تحت ليكتب العنوان بنفسه ويضغط نشر بوعي (لا نشر تلقائي إطلاقاً).
+  document.querySelectorAll('.go-publish-btn').forEach((btn) => {
+    btn.addEventListener('click', () => {
+      const targetId = btn.getAttribute('data-video-target');
+      const videoEl = document.getElementById(targetId);
+      if (!videoEl || !videoEl.src) return;
+      document.getElementById('youtubeVideoUrl').value = videoEl.src;
+      const titleInput = document.getElementById('youtubeTitle');
+      titleInput.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      titleInput.focus();
+    });
+  });
+
   const youtubePublishBtn = document.getElementById('youtubePublishBtn');
   const youtubeStatusBox = document.getElementById('youtubeStatusBox');
 
@@ -626,20 +637,9 @@
         : '⚠️ بدون صوت هذه المرة (فشل توليد الرواية الصوتية المجانية - الفيديو صامت لكنه حقيقي)';
       setStatus(
         `✅ تم توليد الفيديو فعلياً عبر LTX-Video: ${data.scene_count} مشهد/مشاهد، `
-        + `≈${data.total_duration_seconds} ثانية إجمالاً، ${narrationNote}.`,
+        + `≈${data.total_duration_seconds} ثانية إجمالاً، ${narrationNote}. اضغط "انشر على يوتيوب" تحت الفيديو متى ما جهّزت العنوان.`,
         'success'
       );
-
-      // إضافة سطر حالة النشر التلقائي على يوتيوب (يحتاج رابط HTML فعلي، لذا
-      // يُضاف عبر innerHTML بعد استدعاء setStatus النصي أعلاه وليس داخله).
-      if (data.youtube_publish_status === 'published' && data.youtube_url) {
-        statusBox.innerHTML += ` <br>📺 نُشر تلقائياً على يوتيوب (غير مدرج): `
-          + `<a href="${data.youtube_url}" target="_blank" rel="noopener">مشاهدة الفيديو</a>. `
-          + `راجعه ثم غيّره إلى "عام" من يوتيوب استوديو إذا حاب.`;
-      } else if (data.youtube_publish_status === 'failed') {
-        statusBox.innerHTML += ` <br>⚠️ فشل النشر التلقائي على يوتيوب (الفيديو نفسه سليم، بس ما انرفع): `
-          + `${data.youtube_publish_message || ''}`;
-      }
     } catch (err) {
       spinnerBox.classList.add('d-none');
       setStatus('❌ تعذر الاتصال بالسيرفر: ' + err.message, 'danger');
