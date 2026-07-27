@@ -1198,15 +1198,20 @@ async def generate_image_video(
     prompt: str = Form(...),
     voice: str = Form(DEFAULT_NARRATION_VOICE),
     talking_mode: bool = Form(False),
+    quality: str = Form("480p"),
     image: UploadFile = File(...),
 ):
     """توليد فيديو من صورة + برومت. وضعان:
-    1) الافتراضي (talking_mode=False): حركة عامة على الصورة عبر LTX-Video
-       image-to-video، مع رواية صوتية فوقها بلا مزامنة شفاه.
+    1) الافتراضي (talking_mode=False): "دمج المشاهد" - نفس منطق الخاصية
+       الرئيسية أعلاه بالضبط: كل سطر بالبرومت = مشهد ~4.8 ثانية مستقل يُولَّد
+       عبر LTX-Video image-to-video من نفس الصورة المرفوعة (بنفس أسلوب/زاوية
+       الصورة لكن بحركة مختلفة حسب نص كل سطر)، ثم تُدمَج كل المشاهد بـ ffmpeg
+       بنفس _concat_videos_sync المستخدمة بالخاصية الرئيسية - فيديو أطول
+       بدل مشهد وحيد قصير، ومجاني بالكامل لأنه نفس مسار LTX-Video الموجود.
+       عدد المشاهد المسموح يعتمد على باقة المستخدم (نفس SCENE_TIER_TO_COUNT).
     2) talking_mode=True: "الوجه يتكلم فعلياً" - يولَّد صوت الرواية أولاً، ثم
        يُمرَّر مع الصورة الأصلية لمساحة Wav2Lip الحقيقية لمزامنة الشفاه فعلياً
-       مع الكلام - هذا هو الوضع المناسب لصور بورتريه بشرية حقيقية (بعكس
-       LTX-Video الذي بادئته المقصودة أصلاً "كرتوني بلا بشر حقيقيين")."""
+       مع الكلام (مشهد واحد فقط - Wav2Lip لا يدعم تعدد المشاهد بهذا الشكل)."""
     prompt = (prompt or "").strip()
     if not prompt:
         raise HTTPException(status_code=400, detail="الرجاء كتابة وصف للفيديو المطلوب من الصورة.")
@@ -1222,11 +1227,19 @@ async def generate_image_video(
 
     user_id = get_current_user_id()
     user = get_user_row(user_id)
-    cost = 0
+
+    quality = quality if quality in SCENE_TIER_TO_COUNT else "480p"
     if not user["is_unlimited"]:
-        cost = QUALITY_POINTS_COST.get("480p", 5)
+        allowed_qualities = PLAN_ALLOWED_QUALITY.get(user["plan"], ["480p"])
+        if quality not in allowed_qualities:
+            quality = "480p"  # لا نرفض الطلب - نكتفي بأقل جودة مسموحة بدل فشل الطلب بالكامل
+        cost = QUALITY_POINTS_COST[quality]
         if user["points"] < cost:
-            raise HTTPException(status_code=402, detail="رصيدك غير كافٍ لتوليد فيديو من صورة.")
+            raise HTTPException(status_code=402, detail="رصيدك غير كافٍ لتوليد فيديو من صورة بهذه الجودة.")
+    else:
+        cost = 0
+
+    max_scenes = SCENE_TIER_TO_COUNT[quality]
 
     suffix = pathlib.Path(image.filename or "").suffix or ".jpg"
     with tempfile.TemporaryDirectory() as tmp_dir:
@@ -1234,6 +1247,7 @@ async def generate_image_video(
         image_path.write_bytes(image_bytes)
 
         has_narration = False
+        actual_scene_count = 1
         try:
             if talking_mode:
                 narration_path = await _generate_narration_async(prompt, _resolve_narration_voice(voice))
@@ -1246,10 +1260,20 @@ async def generate_image_video(
                     raise VideoGenerationError(f"⚠️ فشل توليد فيديو مزامنة الشفاه: {exc}", status_code=502)
                 video_bytes = pathlib.Path(lip_path).read_bytes()
             else:
-                clip_path = await _generate_one_scene_with_retry(prompt, image_path=str(image_path))
-                video_bytes = clip_path.read_bytes()
+                scenes = _split_into_scenes(prompt, max_scenes)
+                actual_scene_count = len(scenes)
+                clip_paths: list[pathlib.Path] = []
+                for scene_prompt in scenes:
+                    # كل مشهد يُولَّد من نفس الصورة الأصلية (image-to-video) مع
+                    # نص حركة مختلف لكل سطر - أبسط وأثبت طريقة لإطالة المدة
+                    # بدل تسلسل الإطارات (frame-chaining) الأكثر هشاشة.
+                    clip_path = await _generate_one_scene_with_retry(scene_prompt, image_path=str(image_path))
+                    clip_paths.append(clip_path)
+                video_bytes = await run_in_threadpool(_concat_videos_sync, clip_paths)
+
+                full_narration_text = ". ".join(scenes)
                 try:
-                    narration_path = await _generate_narration_async(prompt, _resolve_narration_voice(voice))
+                    narration_path = await _generate_narration_async(full_narration_text, _resolve_narration_voice(voice))
                     video_bytes = await run_in_threadpool(_mux_narration_sync, video_bytes, narration_path)
                     has_narration = True
                 except Exception as exc:  # noqa: BLE001 - فشل الصوت لا يُسقط الفيديو الصامت الناجح
@@ -1268,7 +1292,9 @@ async def generate_image_video(
     return {
         "video_url": video_url,
         "remaining_points": remaining_points,
-        "scene_duration_seconds": SCENE_DURATION_SECONDS,
+        "scene_duration_seconds": SCENE_DURATION_SECONDS * actual_scene_count,
+        "scene_count": actual_scene_count,
+        "quality": quality,
         "has_narration": has_narration,
         "talking_mode": talking_mode,
         "is_unlimited": user["is_unlimited"],
