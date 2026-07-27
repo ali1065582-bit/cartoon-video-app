@@ -62,7 +62,7 @@ from fastapi.responses import HTMLResponse, Response
 from fastapi.templating import Jinja2Templates
 from fastapi.concurrency import run_in_threadpool
 from pydantic import BaseModel
-from gradio_client import Client as GradioClient
+from gradio_client import Client as GradioClient, handle_file
 
 BASE_DIR = pathlib.Path(__file__).parent
 templates = Jinja2Templates(directory=str(BASE_DIR / "templates"))
@@ -335,6 +335,9 @@ R2_PUBLIC_URL_BASE = os.getenv("R2_PUBLIC_URL_BASE", "")
 HF_API_TOKEN = os.getenv("HF_API_TOKEN", "") or None
 LTX_SPACE_ID = os.getenv("LTX_SPACE_ID", "Lightricks/ltx-video-distilled")
 LTX_SPACE_API_NAME = "/text_to_video"
+LTX_SPACE_API_NAME_IMAGE = "/image_to_video"  # نقطة نهاية منفصلة لوضع صورة-إلى-فيديو -
+# /text_to_video لا يقبل رفع صورة فعلياً (باراميتر input_image_filepath فيها Textbox نصي فقط)،
+# فيرسل مسار محلي لا تراه مساحة LTX-Video فيفشل بخطأ "Could not load image".
 
 # ============================================================
 # مساحة Wav2Lip لمزامنة الشفاه (Lip-Sync) - ميزة "صورة + برومت" تستخدمها
@@ -611,7 +614,7 @@ def _generate_scene_via_gradio_sync(prompt: str, image_path: str | None = None) 
     result = client.predict(
         prompt=prompt,
         negative_prompt=LTX_NEGATIVE_PROMPT,
-        input_image_filepath=image_path,
+        input_image_filepath=handle_file(image_path) if image_path else None,
         input_video_filepath=None,   # لا فيديو إدخال بأي من الوضعين المدعومين هنا
         height_ui=LTX_HEIGHT,
         width_ui=LTX_WIDTH,
@@ -622,7 +625,7 @@ def _generate_scene_via_gradio_sync(prompt: str, image_path: str | None = None) 
         randomize_seed=True,  # كل مشهد يحصل على بذرة عشوائية لتنويع الحركة
         ui_guidance_scale=LTX_GUIDANCE_SCALE,
         improve_texture_flag=LTX_IMPROVE_TEXTURE,
-        api_name=LTX_SPACE_API_NAME,
+        api_name=LTX_SPACE_API_NAME_IMAGE if image_path else LTX_SPACE_API_NAME,
     )
     # الإرجاع الحقيقي (video, seed) - الفيديو إما مسار نصي مباشر أو dict بمفتاح path
     video_value = result[0] if isinstance(result, (tuple, list)) else result
@@ -645,8 +648,8 @@ def _generate_lipsync_video_sync(image_path: str, audio_path: str) -> str:
     جزء من الفيديو الناتج من Wav2Lip نفسه، فلا حاجة لـ_mux_narration_sync)."""
     client = GradioClient(LIPSYNC_SPACE_ID)
     result = client.predict(
-        video=image_path,
-        audio=audio_path,
+        video=handle_file(image_path),
+        audio=handle_file(audio_path),
         checkpoint=LIPSYNC_CHECKPOINT,
         no_smooth=0,
         resize_factor=10,
