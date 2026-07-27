@@ -360,7 +360,7 @@ LTX_HEIGHT = 512
 LTX_WIDTH = 704
 LTX_GUIDANCE_SCALE = 1.0  # القيمة الافتراضية الموصى بها لهذا النموذج (distilled/fast)
 LTX_IMPROVE_TEXTURE = False  # معطّلة عمداً لتسريع التوليد وتوفير حصة GPU (انظر الشرح أعلاه)
-SCENE_DURATION_SECONDS = 4.8  # نفس مدة المشهد السابقة (ضمن حد LTX الحقيقي 0.3-8.5s)
+SCENE_DURATION_SECONDS = 8.5  # أقصى مدة يدعمها LTX-Video فعلياً لكل مشهد (كانت 4.8 - رُفعت بطلب المستخدم لفيديو أطول مجاناً)
 
 MAX_RETRIES = 3
 RETRY_WAIT_QUEUE_BUSY = 20
