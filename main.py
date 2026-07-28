@@ -42,6 +42,7 @@ text-to-video عبر gradio_client) - لا يوجد أي "محاكاة" أو ن�
 
 import os
 import re
+import itertools
 import time
 import uuid
 import base64
@@ -706,13 +707,18 @@ async def _generate_one_scene_with_retry(prompt: str, image_path: str | None = N
 
 def _split_into_scenes(prompt: str, max_scenes: int) -> list[str]:
     """
-    يقسّم نص المستخدم إلى عدة "مشاهد" قصيرة (كل واحد يُولَّد كفيديو ~4.8 ثانية
-    مستقل، ثم تُدمَج كلها لاحقاً). أولوية التقسيم:
+    يقسّم نص المستخدم إلى عدة "مشاهد" قصيرة (كل واحد يُولَّد كفيديو مستقل حسب
+    SCENE_DURATION_SECONDS، ثم تُدمَج كلها لاحقاً). أولوية التقسيم:
     1) كل سطر غير فارغ = مشهد منفصل (الأنسب - يعطي المستخدم تحكماً مباشراً
        إن كتب قصته على شكل أسطر/مشاهد مرقّمة).
     2) إن كان النص سطراً واحداً فقط، يُقسَّم على علامات نهاية الجملة (. ! ؟).
     يُقتصَر الناتج دائماً على max_scenes (حسب باقة المستخدم) - لا يُهمَل الباقي
     بصمت، بل يُقتطَع بوضوح والعدد الفعلي يُعاد لاحقاً للواجهة.
+
+    استخدام كامل حصة الباقة دائماً (بطلب المستخدم): إذا كتب المستخدم أسطراً
+    أقل من max_scenes، تُكرَّر نفس الأسطر (cycle) حتى الوصول لـ max_scenes
+    بدل الاكتفاء بعدد أقل - كل تكرار يُولَّد بذرة عشوائية مختلفة (randomize_seed)
+    فتختلف الحركة الفعلية حتى لو تكرر نص المشهد، فلا يكون فيديو مكرراً حرفياً.
     """
     lines = [ln.strip() for ln in prompt.splitlines() if ln.strip()]
     if len(lines) <= 1:
@@ -720,7 +726,11 @@ def _split_into_scenes(prompt: str, max_scenes: int) -> list[str]:
         lines = [p.strip() for p in parts if p.strip()]
     if not lines:
         lines = [prompt.strip()]
-    return lines[:max_scenes]
+    lines = lines[:max_scenes]
+    if 0 < len(lines) < max_scenes:
+        cycle = itertools.cycle(lines)
+        lines = [next(cycle) for _ in range(max_scenes)]
+    return lines
 
 
 def _concat_videos_sync(clip_paths: list[pathlib.Path]) -> bytes:
