@@ -355,7 +355,14 @@ LIPSYNC_CHECKPOINT = "wav2lip_gan"  # جودة أعلى من "wav2lip" العا�
 LTX_NEGATIVE_PROMPT = (
     "worst quality, inconsistent motion, blurry, jittery, distorted, "
     "realistic human, photorealistic, live-action, real person, human face close-up, "
-    "portrait photography, nudity, nsfw, sexual content, adult content"
+    "portrait photography, nudity, nsfw, sexual content, adult content, "
+    # منع هلوسة LTX-Video بشعارات/واجهات قنوات يوتيوب مزيّفة داخل الفيديو نفسه
+    # (مشكلة حقيقية لاحظها المستخدم: شعارات وأسماء قنوات وهمية بزوايا الفيديو،
+    # ناتجة عن تدريب النموذج على محتوى يوتيوب حقيقي فيه هذه العناصر) -
+    "youtube logo, youtube watermark, channel logo, channel branding, channel name, "
+    "subscribe button, subscribe icon, play button icon, video overlay text, "
+    "on-screen text, caption text, watermark, logo, brand logo, ui overlay, "
+    "app interface, screen recording, streaming overlay"
 )
 LTX_HEIGHT = 512
 LTX_WIDTH = 704
@@ -581,7 +588,8 @@ def _delete_object_from_r2_sync(key: str) -> None:
 CARTOON_STYLE_PREFIX = (
     "children's cartoon style, 2D animation, colorful, cute animal characters, "
     "family-friendly, wholesome, no realistic humans, no photorealistic imagery, "
-    "no live-action footage. Scene: "
+    "no live-action footage, clean video with no logos, no watermarks, no channel "
+    "branding, no on-screen text or UI overlays. Scene: "
 )
 
 
