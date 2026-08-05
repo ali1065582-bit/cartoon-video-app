@@ -607,9 +607,18 @@ def _translate_to_english_best_effort(text: str) -> str:
         return text
 
 
+MOTION_SUFFIX = (
+    ". Continuous lively animated motion throughout the whole clip: the characters "
+    "are constantly moving, walking, running, jumping and gesturing, limbs and "
+    "faces animate expressively, background elements sway, dynamic camera with "
+    "slow pan and gentle zoom, high amount of movement, nothing stays still, "
+    "not a static image"
+)
+
+
 def _build_safe_scene_prompt(scene_text: str) -> str:
     english_scene = _translate_to_english_best_effort(scene_text)
-    return CARTOON_STYLE_PREFIX + english_scene
+    return CARTOON_STYLE_PREFIX + english_scene + MOTION_SUFFIX
 
 
 # ============================================================
@@ -713,6 +722,25 @@ async def _generate_one_scene_with_retry(prompt: str, image_path: str | None = N
     raise VideoGenerationError(last_message, status_code=503)
 
 
+def _probe_duration_seconds(video_bytes: bytes) -> float:
+    """يقيس المدة الحقيقية للفيديو الناتج بدل حسابها نظرياً."""
+    import imageio_ffmpeg
+    ffmpeg_exe = imageio_ffmpeg.get_ffmpeg_exe()
+    try:
+        with tempfile.NamedTemporaryFile(suffix=".mp4", delete=False) as fh:
+            fh.write(video_bytes)
+            tmp_name = fh.name
+        result = subprocess.run([ffmpeg_exe, "-i", tmp_name], capture_output=True, text=True)
+        os.unlink(tmp_name)
+        m = re.search(r"Duration:\s*(\d+):(\d+):(\d+\.?\d*)", result.stderr)
+        if m:
+            h, mnt, s = m.groups()
+            return round(int(h) * 3600 + int(mnt) * 60 + float(s), 1)
+    except Exception:  # noqa: BLE001
+        pass
+    return 0.0
+
+
 def _split_into_scenes(prompt: str, max_scenes: int) -> list[str]:
     """
     يقسّم نص المستخدم إلى عدة "مشاهد" قصيرة (كل واحد يُولَّد كفيديو مستقل حسب
@@ -735,9 +763,7 @@ def _split_into_scenes(prompt: str, max_scenes: int) -> list[str]:
     if not lines:
         lines = [prompt.strip()]
     lines = lines[:max_scenes]
-    if 0 < len(lines) < max_scenes:
-        cycle = itertools.cycle(lines)
-        lines = [next(cycle) for _ in range(max_scenes)]
+    # تعديل: لا نكرر الأسطر لملء الباقة - سطر واحد = مشهد واحد (توفير حصة GPU).
     return lines
 
 
@@ -1370,13 +1396,15 @@ async def merge_scenes(payload: MergeScenesRequest):
 
     scene_count = len(payload.scene_keys)
 
+    real_duration = await run_in_threadpool(_probe_duration_seconds, video_bytes)
+
     return {
         "video_url": video_url,
         "remaining_points": remaining_points,
         "quality": quality,
         "scene_count": scene_count,
-        "scene_duration_seconds": SCENE_DURATION_SECONDS,
-        "total_duration_seconds": round(scene_count * SCENE_DURATION_SECONDS, 1),
+        "scene_duration_seconds": round(real_duration / scene_count, 1) if scene_count else 0,
+        "total_duration_seconds": real_duration,
         "has_narration": has_narration,
         "is_unlimited": user["is_unlimited"],
     }
